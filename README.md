@@ -4,13 +4,31 @@ Originally released as **ManageBac Grade Calculator**. The first build was v1.0.
 
 Download the current build from [GitHub Releases](https://github.com/IronPlayz1234/GradeLens/releases/latest). The [release archive](https://github.com/IronPlayz1234/GradeLens/releases) contains installable ZIPs for the historical versions.
 
-A private Chrome extension for students at `uia.managebac.com`. It adds **Overall Grades** and **Grade Estimator** below **My Workspace → Tasks & Deadlines**. Class Overview gets a compact grade card, and Class Tasks gets a second card inside **All Tasks**, above the native charts.
+<img src="assets/icons/gradelens-128.png" alt="GradeLens icon" width="72" align="right">
+
+An unofficial Chrome extension for students at `uia.managebac.com`. GradeLens adds **Overall Grades** and **Grade Estimator** to **My Workspace**, puts grade summaries on class pages, and brings dark mode to supported ManageBac screens.
+
+## Dark mode gallery
+
+**Overall Grades** shows a calculated grade and the selected grading method for each subject.
+
+[![GradeLens Overall Grades in dark mode with a subject list, term selector, and grade summary](docs/screenshots/overall-grades-dark.png)](docs/screenshots/overall-grades-dark.png)
+
+| Grade Estimator | Class Overview |
+| --- | --- |
+| [![Grade Estimator in dark mode with a what-if grade projection](docs/screenshots/grade-estimator-dark.png)](docs/screenshots/grade-estimator-dark.png) | [![Dark class overview with a calculated grade card and a sidebar grade badge](docs/screenshots/class-overview-dark.png)](docs/screenshots/class-overview-dark.png) |
+
+| Timetable | Calendar |
+| --- | --- |
+| [![ManageBac timetable in dark mode with lesson and room details](docs/screenshots/timetable-dark.png)](docs/screenshots/timetable-dark.png) | [![ManageBac calendar in dark mode with colored events](docs/screenshots/calendar-dark.png)](docs/screenshots/calendar-dark.png) |
+
+[See the Grade Goal Planner in dark mode](docs/screenshots/goal-planner-dark.png). Screenshots use sample classes and grades from the browser test fixtures.
 
 ## Install locally
 
-1. In Chrome or a Chromium-based browser, open `chrome://extensions`.
-2. Turn on **Developer mode**.
-3. Click **Load unpacked** and select the project folder that contains `manifest.json`.
+1. Download and unzip the latest GradeLens release ZIP.
+2. In Chrome or a Chromium-based browser, open `chrome://extensions` and turn on **Developer mode**.
+3. Click **Load unpacked** and select the extracted folder that contains `manifest.json`.
 4. Open or reload a signed-in student page on `https://uia.managebac.com`.
 5. Open **Overall Grades** and choose the academic term and calculation method. The global default applies to any subject without its own method across all grade views.
 6. Open **Class Tasks** or **Tasks & Deadlines → Past** if grades or weights are missing. Scroll or use the site’s controls to load additional historical tasks. Click **Refresh now** under **Overall Grades** or **Grade Estimator** to check available pages again.
@@ -125,7 +143,7 @@ The browser suite defaults to Playwright’s Chrome for Testing build. For a sec
 
 ## Visual assets
 
-The GradeLens lens-and-chart icon was created with the built-in ImageGen tool. The transparent master and the 16, 32, 48, and 128 px PNGs are under `assets/icons/gradelens-*.png`. The sidebar SVG paths are bundled in `src/ui/icons.js` with the upstream license in `assets/LUCIDE-LICENSE.txt`.
+The GradeLens lens-and-chart icon was created with the built-in ImageGen tool. The 16, 32, 48, and 128 px PNGs are under `assets/icons/gradelens-*.png`. The sidebar SVG paths are bundled in `src/ui/icons.js` with the upstream license in `assets/LUCIDE-LICENSE.txt`.
 
 ImageGen prompt:
 
