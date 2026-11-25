@@ -406,3 +406,45 @@ test('assessment destinations require a collected link and matching IDs on the s
     assert.equal(app.taskDestination({ ...task, taskUrl }, tasksURL), null);
   }
 });
+
+test('pending workspace rows without score markup retain the November 20 local deadlines', () => {
+  const url = new URL(host + '/student/tasks_and_deadlines?tab=upcoming');
+  const doc = parseHTML(`<main><section data-upcoming-tasks data-total-count="4">
+    <article><a href="/student/classes/123/core_tasks/121">Quadratics</a>
+      <span class="task-subject">Mathematics AS</span><p>Due: November 20, 2026 at 8:00 AM</p>
+      <span class="task-status">Pending</span><span class="task-category">Coursework</span></article>
+    <div><a href="/student/classes/123/core_tasks/122">Functions</a><div class="due-date">Fri, 20 Nov 2026, 08:00</div></div>
+    <article><a href="/student/classes/123/core_tasks/123">Trigonometry</a>
+      <time data-role="due" datetime="2026-11-20T08:00:00+09:00">20 Nov</time></article>
+    <article data-status="Completed"><a href="/student/classes/123/core_tasks/124">Series</a>
+      <div class="due-date">2026-11-20T08:00:00</div></article>
+    </section></main>`).document;
+  const scan = app.scan(doc, url);
+  assert.equal(scan.upcomingCoverage, 'complete');
+  assert.equal(scan.diagnostic.points, 0);
+  assert.equal(scan.records[0].due, new Date(2026, 10, 20, 8).getTime());
+  assert.equal(scan.records[1].due, scan.records[0].due);
+  assert.equal(scan.records[2].due, Date.parse('2026-11-19T23:00:00Z'));
+  assert.equal(scan.records[3].due, scan.records[0].due);
+  assert.equal(scan.records[0].status, 'Pending');
+  assert.equal(scan.records[0].subject, 'Mathematics AS');
+  assert.equal(scan.records[0].category, 'Coursework');
+  const cache = app.freshCache();
+  app.mergeScan(cache, scan);
+  const now = Math.min(...scan.records.map((task) => task.due)) - 60000;
+  assert.deepEqual(app.upcomingTasks(cache, app.currentTerms, now).map(({ id }) => id).sort(), ['121', '122', '123']);
+  assert.equal(app.upcomingTasks(cache, app.currentTerms, Math.max(...scan.records.map((task) => task.due))).length, 0);
+});
+
+test('workspace shells and partial schedules cannot prove the upcoming list is empty', () => {
+  const url = new URL(host + '/student/tasks_and_deadlines');
+  const state = (html, page = url) => app.scan(parseHTML(html).document, page).upcomingCoverage;
+  assert.equal(state('<main><button type="button">Upcoming</button></main>'), 'unavailable');
+  assert.equal(state('<main><section data-upcoming-tasks hidden><p>No upcoming assignments.</p></section></main>'), 'unavailable');
+  assert.equal(state('<main><section data-upcoming-tasks aria-busy="true"><p>No upcoming assignments.</p></section></main>'), 'unavailable');
+  assert.equal(state('<main><section data-upcoming-tasks><p>No upcoming assignments.</p></section></main>'), 'complete');
+  assert.equal(state('<main><strong>No upcoming assignments.</strong></main>', new URL(url + '?tab=past')), undefined);
+  const discover = app.scan(parseHTML('<main><a href="?tab=upcoming">Upcoming Tasks (5)</a></main>').document, url);
+  // Native workspace filters may use a relative query link.
+  assert.ok(discover.sources.includes('/student/tasks_and_deadlines?tab=upcoming'));
+});

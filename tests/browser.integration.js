@@ -889,3 +889,108 @@ test('assessment search, upcoming predictions, appearance and welcome work toget
     await fs.rm(profile, { recursive: true, force: true });
   }
 });
+
+test('upcoming Mathematics tasks hydrate from the workspace without visiting the class', { timeout: 22000 }, async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-native-upcoming-'));
+  const browser = await chromium.launchPersistentContext(profile, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root], timezoneId: 'Asia/Tokyo'
+  });
+  try {
+    browser.setDefaultTimeout(7000);
+    const workspace = '/student/tasks_and_deadlines';
+    const titles = ['Quadratics', 'Functions', 'Trigonometry', 'Series', 'Revision'];
+    const row = (title, index, date, status = 'Pending') => `<article>
+      <a href="${tasksPath}/${500 + index}">${title}</a><span class="task-subject">Mathematics AS</span>
+      <p>Due: November ${date}, 2026 at 8:00 AM</p><p class="task-status">${status}</p>
+      <span class="task-category">Coursework</span><span class="labels-set"><span class="label">${index % 2 ? 'Formative' : 'Summative'}</span></span>
+    </article>`;
+    const schedule = titles.map((title, index) => row(title, index, 20)).join('') +
+      row('Past test', 5, 18) + row('Submitted work', 6, 20, 'Submitted');
+    const shell = (content) => '<meta name="current-student-id" content="9"><aside><nav>' +
+      '<a href="' + workspace + '">Tasks &amp; Deadlines</a><a href="/student/classes/123">Mathematics AS</a>' +
+      '</nav></aside><main>' + content + '</main>';
+    const classPage = (await fixture('class-tasks')).replace('<div data-task-list="all" data-term-id="71" data-total-count="4">',
+      '<div data-task-list="all" data-term-id="71" data-total-count="5">' + row('Quadratics', 0, 20));
+    let phase = 'normal';
+    let backgroundFrames = 0;
+    let classVisits = 0;
+    await browser.route(host + '/**', (intercepted) => {
+      const request = intercepted.request();
+      const { pathname } = new URL(request.url());
+      if (pathname === tasksPath) {
+        if (request.isNavigationRequest() && !request.frame().parentFrame()) classVisits++;
+        return intercepted.fulfill({ contentType: 'text/html', body: classPage });
+      }
+      if (pathname === workspace) {
+        if (request.isNavigationRequest() && request.frame().parentFrame()) backgroundFrames++;
+        if (phase === 'failed') return intercepted.fulfill({ status: 503, body: 'Unavailable' });
+        if (phase === 'empty') return intercepted.fulfill({ contentType: 'text/html',
+          body: shell('<section data-upcoming-tasks><p>No upcoming assignments.</p></section>') });
+        const body = shell(`<button type="button" role="tab" aria-selected="false" aria-controls="tasks">Upcoming Tasks (5)</button>
+          <section id="tasks" role="tabpanel"></section>
+          <script>
+            const upcoming = document.querySelector('button');
+            upcoming.onclick = () => {
+              upcoming.setAttribute('aria-selected','true');
+              const panel = document.querySelector('#tasks');
+              panel.setAttribute('aria-busy', 'true');
+              setTimeout(() => {
+                panel.innerHTML = ${JSON.stringify('<div data-total-count="7">' + schedule + '</div>')};
+                panel.removeAttribute('aria-busy');
+              }, 320);
+            };
+          </script>`);
+        return intercepted.fulfill({ contentType: 'text/html', body });
+      }
+      return intercepted.fulfill({ contentType: 'text/html', body: shell('<h1>Student home</h1>') });
+    });
+
+    const tab = await browser.newPage();
+    await tab.goto(host + '/student/dashboard');
+    await tab.getByRole('link', { name: 'Overall Grades' }).waitFor();
+    const evaluate = await extensionWorld(browser, tab);
+    await evaluate(`globalThis.realClock = Date.now; globalThis.testClock = ${Date.parse('2026-11-19T14:30:00Z')};
+      const clockStart = realClock(); Date.now = () => testClock + realClock() - clockStart;`);
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    const panel = tab.locator('.mbgc-upcoming');
+    await panel.getByText('Checking upcoming assignments…').waitFor();
+    for (const title of titles) await panel.getByRole('link', { name: title + ' (opens in a new tab)', exact: true }).waitFor();
+    assert.equal(await panel.locator('li').count(), 5);
+    assert.equal(await panel.getByText(/Mathematics AS · Due Nov 20, 2026, 8:00 AM · Coursework · Pending/).count(), 5);
+    assert.equal(backgroundFrames, 1);
+    assert.equal(classVisits, 0);
+    await tab.locator('.mbgc-subject-grade').getByText('74.50%', { exact: true }).waitFor();
+    await panel.getByRole('button', { name: 'Try a grade for Quadratics' }).click();
+    assert.equal(await tab.getByLabel('Category', { exact: true }).inputValue(), 'Coursework');
+    assert.equal(await tab.getByLabel('Earned points').inputValue(), '');
+    assert.equal(await tab.getByLabel('Maximum points').inputValue(), '');
+    await tab.getByLabel('Maximum points').fill('25');
+    await tab.getByLabel('Earned points').fill('20');
+    await tab.locator('.mbgc-predicted-score').getByText('76.00%', { exact: true }).waitFor();
+    await tab.locator('.mbgc-actual').getByText('74.50%', { exact: true }).waitFor();
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+
+    const worker = browser.serviceWorkers()[0];
+    const permitRefresh = () => worker.evaluate(() => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:9:refresh'));
+    const refresh = tab.getByRole('button', { name: 'Refresh now' });
+    await refresh.waitFor();
+    phase = 'failed';
+    await permitRefresh();
+    await refresh.click();
+    await panel.getByText('Some upcoming assignments may be missing.').waitFor();
+    assert.equal(await panel.locator('li').count(), 5);
+
+    phase = 'empty';
+    await evaluate(`testClock = ${Date.parse('2026-11-19T23:10:00Z')};`);
+    // A worker timestamp and the fixture's previously shifted lease can differ.
+    await permitRefresh();
+    await refresh.click();
+    await panel.getByText('No upcoming assignments in the checked schedule.').waitFor();
+    assert.equal(await panel.locator('li').count(), 0);
+    assert.equal(classVisits, 0);
+  } finally {
+    await browser.close();
+    await fs.rm(profile, { recursive: true, force: true });
+  }
+});

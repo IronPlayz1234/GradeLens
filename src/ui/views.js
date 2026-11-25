@@ -494,15 +494,23 @@
     const day = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
     const list = h('ul', 'mbgc-upcoming-list', tasks.map((task) => {
       const due = typeof task.due === 'number' ? time.format(task.due) : day.format(new Date(task.due + 'T12:00:00'));
-      const meta = [task.subject, 'Due ' + due, task.category, task.possiblePoints ? number(task.possiblePoints, 6) + ' points' : ''].filter(Boolean);
+      const meta = [task.subject, 'Due ' + due, task.category, task.status, task.possiblePoints ? number(task.possiblePoints, 6) + ' points' : ''].filter(Boolean);
       const tryGrade = button('Try a grade', () => handlers.tryTask(task), 'estimator');
       tryGrade.setAttribute('aria-label', 'Try a grade for ' + task.title);
       return h('li', 'mbgc-upcoming-task', h('div', '', h('strong', '', taskTitle(task)),
         h('p', 'mbgc-muted', meta.join(' · '))), tryGrade);
     }));
-    return h('section', 'mbgc-panel mbgc-upcoming', h('h2', '', 'Upcoming Assessments'),
-      tasks.length ? list : h('p', 'mbgc-muted', 'No upcoming assessments found in the tasks synced so far.'),
-      tasks.length ? h('p', 'mbgc-muted mbgc-upcoming-note', 'Shows tasks with a future due date in the synced data.') : null);
+    const maxAge = Math.max(15, sync.settings.refreshMinutes * 2) * 60000;
+    const checked = Object.values(sync.cache.sourceChecks ?? {}).some((check) =>
+      check.upcomingCoverage === 'complete' && Date.now() - check.at <= maxAge &&
+      (view.term === app.currentTerms || 'term:' + check.termId === view.term));
+    const summary = sync.refreshing || !sync.context ? 'Checking upcoming assignments…' : tasks.length ?
+      (checked ? '' : 'Some upcoming assignments may be missing.') : checked ?
+        'No upcoming assignments in the checked schedule.' :
+        'Upcoming assignments could not be fully checked. Try Refresh now or open Tasks & Deadlines.';
+    const status = summary ? h('p', 'mbgc-muted mbgc-upcoming-note', summary) : null;
+    if (status) status.setAttribute('role', 'status');
+    return h('section', 'mbgc-panel mbgc-upcoming', h('h2', '', 'Upcoming Assessments'), tasks.length ? list : null, status);
   }
 
   function header(sync, kind, view, handlers, termOptions) {
@@ -567,6 +575,7 @@
       const checked = new Set(Object.values(sync.cache.sourceChecks ?? {}).filter((check) =>
         check.at >= sync.lastAttempt && sync.cache.classes[check.classId]).map((check) => check.classId));
       content.append(gradeLoading(classes.length, checked.size));
+      content.append(upcomingPanel(sync, view, handlers));
       return content;
     }
     content.append(

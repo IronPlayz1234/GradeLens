@@ -251,7 +251,10 @@
       const signature = JSON.stringify({ ...verified, at: 0, route: url.pathname + url.search });
       if (signature !== this.signature || this.storageState === 'unavailable') {
         this.signature = signature;
-        await this.apply([verified]);
+        const checks = verified.upcomingCoverage === 'complete' && !verified.loading ? [{
+          source: url.pathname + url.search, upcomingCoverage: 'complete', termId: verified.term.id, at: verified.at
+        }] : [];
+        await this.apply([verified], checks);
       }
       this.update();
     }
@@ -335,14 +338,20 @@
 
     async inspectSource(source, url, signal, account, detail) {
       const storedCheck = this.cache.sourceChecks?.[source];
-      const previous = !detail || (storedCheck?.termId === detail.termId && app.validScore(detail)) ? storedCheck : null;
       const route = app.route(url);
+      const checkUpcoming = route.type === 'workspace' && app.workspaceFilter(url) !== 'past';
+      // Older hashes predate upcoming coverage and must be read once by the new scanner.
+      const canReuse = checkUpcoming ? Boolean(storedCheck?.upcomingCoverage) :
+        !detail || (storedCheck?.termId === detail.termId && app.validScore(detail));
+      const previous = canReuse ? storedCheck : null;
+      const renderable = checkUpcoming || ['tasks', 'roster'].includes(route.type);
       const requested = app.termFromURL(url);
       const check = { source, classId: route.classId, termId: detail?.termId ?? requested?.id ?? previous?.termId, detail: Boolean(detail), at: Date.now() };
+      if (checkUpcoming) check.upcomingCoverage = 'unavailable';
       try {
         const page = await fetchPage(url, AbortSignal.any([signal, AbortSignal.timeout(5500)]), previous?.error ? undefined : previous?.etag);
         if (!page) return { check: { ...check, error: 'The student page could not be read. Try Refresh now or open Class Tasks.' } };
-        if (page.redirected) return { check: { ...check, renderedCandidate: ['tasks', 'roster'].includes(route.type),
+        if (page.redirected) return { check: { ...check, renderedCandidate: renderable,
           error: 'ManageBac redirected the student page. The destination needs verification.' } };
         if (page.unchanged && previous && !previous.error) return { check: { ...previous, at: check.at, unchanged: true }, ok: true };
         const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(page.body)))]
@@ -354,7 +363,7 @@
         const evidence = app.accountEvidence(html, page.url);
         if (!this.matchesAccount(evidence, account)) return { check: { ...check,
           error: 'The returned HTML did not verify the student account.',
-          renderedCandidate: evidence.status !== 'conflicting' && !evidence.id && ['tasks', 'roster'].includes(route.type) } };
+          renderedCandidate: evidence.status !== 'conflicting' && !evidence.id && renderable } };
         if (detail) {
           const scan = app.scanTaskDetail(html, page.url, detail);
           if (scan) scan.at = check.at;
@@ -397,6 +406,15 @@
           error = 'The class list did not expose enrolled class links in its HTML.';
           renderedCandidate = true;
         }
+        if (checkUpcoming) {
+          check.upcomingCoverage = snapshot.upcomingCoverage ?? 'unavailable';
+          const hasUpcomingLink = app.workspaceFilter(page.url) !== 'upcoming' && snapshot.sources.some((source) =>
+            app.workspaceFilter(new URL(source, page.url)) === 'upcoming');
+          const control = app.upcomingControl(html);
+          renderedCandidate = !hasUpcomingLink && check.upcomingCoverage !== 'complete' &&
+            (check.upcomingCoverage === 'unavailable' || (control && !app.activeUpcoming(control))) &&
+            Boolean(html.querySelector(scriptSelector));
+        }
         if (error) snapshot.complete = false;
         if (snapshot.diagnostic.loading) {
           snapshot.loading = true;
@@ -406,7 +424,8 @@
           snapshot.readable = false;
         }
         return { snapshot, check: { ...check, error, renderedCandidate,
-          hash: !error ? hash : undefined, etag: !error && page.etag ? page.etag : undefined, complete: snapshot.complete },
+          hash: !error && !renderedCandidate ? hash : undefined,
+          etag: !error && !renderedCandidate && page.etag ? page.etag : undefined, complete: snapshot.complete },
           ok: !error && (snapshot.readable || route.type === 'roster') };
       } catch {
         return { check: { ...check, error: 'The student page did not respond. Try Refresh now again.' } };
@@ -443,6 +462,7 @@
         const deadline = performance.now() + 4500;
         let best = null;
         let openedTermMenu = false;
+        let openedUpcoming = false;
         let dirty = true;
         const doc = frame.contentDocument;
         if (!doc) return null;
@@ -460,6 +480,17 @@
               if (identity.status === 'conflicting' || (identity.id && identity.id !== account)) return null;
               if (this.matchesAccount(identity, account)) {
                 const scan = app.scan(doc, actual);
+                const hasDeadlines = scan.records.some((task) => task.due !== undefined);
+                if (wanted.type === 'workspace') {
+                  const control = app.upcomingControl(doc);
+                  if (!openedUpcoming && control && !app.activeUpcoming(control) && scan.upcomingCoverage !== 'complete') {
+                    openedUpcoming = true;
+                    control.click();
+                    continue;
+                  }
+                  if (scan.upcomingCoverage === 'complete') return { ...scan, at: started, sourceKind: 'rendered' };
+                  if (scan.upcomingCoverage === 'partial') best = { ...scan, at: started, sourceKind: 'rendered' };
+                }
                 if (wanted.type === 'tasks' && !scan.term.id && !openedTermMenu) {
                   const surface = app.taskSurface(doc);
                   const controls = [...(surface.section?.querySelectorAll('button[aria-haspopup],button[role="combobox"],button.dropdown-toggle') ?? [])]
@@ -472,12 +503,16 @@
                 }
                 if (wanted.type === 'roster' && Object.keys(scan.classes).length) return scan;
                 if (scan.term.id && (!selected || selected.id === scan.term.id) && !scan.diagnostic.loading) {
-                  if (scan.diagnostic.points || scan.complete) {
+                  if (scan.diagnostic.points || scan.complete || hasDeadlines) {
                     const previous = this.cache.classes[wanted.classId]?.terms['term:' + scan.term.id];
-                    if (!scan.diagnostic.points && Object.values(previous?.records ?? {}).some(app.validScore)) best = null;
+                    if (!scan.diagnostic.points && Object.values(previous?.records ?? {}).some(app.validScore)) {
+                      if (hasDeadlines) best = { ...scan, at: started, complete: false, sourceKind: 'rendered' };
+                    }
                     else best = { ...scan, at: started, defaultTerm: !actual.search, sourceKind: 'rendered' };
                     if (scan.diagnostic.points && scan.diagnostic.weights) return best;
                   }
+                } else if (wanted.type === 'tasks' && !selected && hasDeadlines && !scan.diagnostic.loading) {
+                  best = { ...scan, at: started, complete: false, sourceKind: 'rendered' };
                 }
               } else best = null;
               if (!doc.querySelector(scriptSelector)) return best;
@@ -514,12 +549,14 @@
       }
       const urls = this.sources();
       const now = Date.now();
-      if (!manual) for (const source of urls.keys()) {
+      const needsWorkspaceCheck = (source, url) => app.route(url).type === 'workspace' &&
+        app.workspaceFilter(url) !== 'past' && !this.cache.sourceChecks?.[source]?.upcomingCoverage;
+      if (!manual) for (const [source, url] of urls) {
         const checkedAt = this.cache.sourceChecks?.[source]?.at;
-        if (checkedAt && now - checkedAt < interval) urls.delete(source);
+        if (checkedAt && now - checkedAt < interval && !needsWorkspaceCheck(source, url)) urls.delete(source);
       }
       if (!urls.size) return;
-      const hasNewSources = [...urls.keys()].some((source) => !this.cache.sourceChecks?.[source]);
+      const hasNewSources = [...urls].some(([source, url]) => !this.cache.sourceChecks?.[source] || needsWorkspaceCheck(source, url));
       if (!manual && now - this.lastAttempt < (hasNewSources ? retryDelay : interval)) return;
       this.lastAttempt = now;
       this.refreshing = true;
@@ -620,7 +657,8 @@
               }
               continue;
             }
-            renderedChecks.sort((a, b) => (this.cache.sourceChecks?.[a.source]?.renderedAt ?? 0) -
+            renderedChecks.sort((a, b) => Number(Boolean(b.upcomingCoverage)) - Number(Boolean(a.upcomingCoverage)) ||
+              (this.cache.sourceChecks?.[a.source]?.renderedAt ?? 0) -
               (this.cache.sourceChecks?.[b.source]?.renderedAt ?? 0));
             const check = renderedChecks.shift();
             const subject = this.cache.classes[check.classId];
@@ -633,14 +671,15 @@
             if (!await confirmAccount()) return;
             if (rendered) {
               checked++;
-              failures--;
+              if (check.error) failures--;
               await this.apply([rendered], [{ ...check, at: rendered.at, error: undefined,
-                termId: rendered.term.id, renderedAt: rendered.at, renderedCandidate: false, complete: rendered.complete }]);
+                termId: rendered.term.id, renderedAt: rendered.at, renderedCandidate: false, complete: rendered.complete,
+                upcomingCoverage: rendered.upcomingCoverage ?? check.upcomingCoverage }]);
               discover(rendered);
             } else {
               const at = Date.now();
               await this.apply([], [{ ...check, at, renderedAt: at,
-                error: check.error + ' A rendered read did not expose verifiable results.' }]);
+                error: check.error ? check.error + ' A rendered read did not expose verifiable results.' : undefined }]);
             }
             continue;
           }

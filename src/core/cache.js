@@ -182,7 +182,7 @@
         if ((!known && elsewhere.has(id)) || [known, extra].some((task) =>
           task && (task.completed || app.validScore(task) || task.gradeKind === 'letter'))) continue;
         const task = known ?? extra;
-        const due = known?.due ?? extra?.due;
+        const due = (extra?.observedAt > known?.observedAt ? extra.due : known?.due) ?? known?.due ?? extra?.due;
         const expiresAt = deadline(due);
         if (!(expiresAt > now)) continue;
         upcoming.push({ ...task, classId, due, expiresAt, termKey: key, subject: subject.name || task.subject || 'Class ' + classId,

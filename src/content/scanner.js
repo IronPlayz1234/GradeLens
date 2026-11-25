@@ -4,6 +4,9 @@
   const studentPath = (path) => path === '/student' || path.startsWith('/student/');
   const rosterPattern = /^\/student\/(?:classes|my_classes)\/?$/;
   const workspacePath = '/student/tasks_and_deadlines';
+  const upcomingLabel = /^upcoming(?: (?:tasks|assignments|assessments))?(?: \(\d+\))?$/i;
+  const workspaceFilterKeys = ['tab', 'view', 'filter', 'period', 'timeframe', 'status', 'type'];
+  const dueSelector = '[data-due-at],[data-due-date],[data-due-datetime],[data-deadline],[data-label="Due"],.task-due-date,.due-date,.due_date,.due-at,time[data-role="due"]';
   const termParams = ['term_id', 'academic_term_id', 'semester_id', 'reporting_period_id', 'term', 'semester'];
   const headingSelector = 'h1,h2,h3,h4,h5,[role="heading"],.h2,.h3,.h4,.section-title,.panel-title,.card-title,div,span,strong';
   const selectors = {
@@ -309,7 +312,7 @@
       target.pathname === url.pathname && termId === activeTerm;
     const browsingCatalog = current.type === 'roster' && (!sourceURL(url, url) ||
       [...doc.querySelectorAll('[aria-current="page"],[aria-selected="true"],.active')].some((node) => /^browse all classes$/i.test(txt(node))));
-    for (const link of doc.querySelectorAll(discoveryLinks)) {
+    for (const link of doc.querySelectorAll(discoveryLinks + (current.type === 'workspace' ? ',a[href^="?"]' : ''))) {
       if (link.closest('.mbgc-owned')) continue;
       const href = link.getAttribute('href');
       if (/\/(?:core_tasks|tasks)\/\d+(?:[/?#]|$)/.test(href)) continue;
@@ -333,11 +336,13 @@
       }
       if (location.type === 'workspace') {
         // Reuse native, link-backed workspace filters.
-        const filter = txt(link).toLowerCase();
+        const label = txt(link);
+        const filter = upcomingLabel.test(label) ? 'upcoming' : label.toLowerCase();
         if (['past', 'upcoming'].includes(filter)) {
           const params = new URLSearchParams();
           for (const [name, value] of destination.searchParams) {
-            if (['tab', 'view', 'filter', 'period', 'timeframe', 'status', 'type'].includes(name) && value.toLowerCase() === filter) {
+            const normalizedValue = value.toLowerCase() === 'future' ? 'upcoming' : value.toLowerCase();
+            if (workspaceFilterKeys.includes(name) && normalizedValue === filter) {
               params.set(name, value);
             }
           }
@@ -397,6 +402,7 @@
   }
 
   function taskNodes(doc, url) {
+    const workspace = route(url).type === 'workspace';
     const known = [...doc.querySelectorAll(selectors.tasks)].filter(exposed);
     const nodes = new Set(known.filter((node) => !node.matches('[data-task-id], [data-assignment-id], [data-assessment-id]') ||
       ['DIV', 'LI', 'ARTICLE', 'SECTION', 'TR'].includes(node.tagName)));
@@ -404,14 +410,15 @@
       if (link.closest(selectors.tasks) || !exposed(link)) continue;
       const destination = localURL(link.getAttribute('href'), url);
       if (!destination || route(destination).type !== 'task') continue;
-      // An alternate task row needs its own stable task link and a local score container.
+      // An alternate row needs a stable task link and either task structure or local evidence.
       for (let row = link.parentElement; row && !row.matches('main, body'); row = row.parentElement) {
         const links = [...row.querySelectorAll('a[href]')].filter((item) => {
           const target = localURL(item.getAttribute('href'), url);
           return target && route(target).type === 'task';
         });
         if (links.some((item) => localURL(item.getAttribute('href'), url).pathname !== destination.pathname)) break;
-        if (row.matches('tr,[role="row"],li[data-due-at],article[data-due-at]') ||
+        if (row.matches('tr,[role="row"],' + dueSelector) || (workspace && row.matches('li,article')) || row.querySelector(dueSelector) ||
+          (/due(?:\s|:)/i.test(txt(row)) && readDueDate(row) !== null) ||
           row.querySelector([selectors.score, selectors.points, selectors.letter, selectors.rubric].join(','))) {
           nodes.add(row);
           break;
@@ -421,24 +428,103 @@
     return [...nodes];
   }
 
-  const taskMetadata = '[data-due-at],[data-due-date],[data-due-datetime],[data-completed],[data-possible-points],[data-total-points],.task-due-date,.due-date,.due-at';
+  const taskMetadata = dueSelector + ',[data-completed],[data-possible-points],[data-total-points]';
+
+  function workspaceFilter(url) {
+    const filter = [...url.searchParams].find(([key, value]) =>
+      workspaceFilterKeys.includes(key) && /^(?:past|upcoming|future)$/i.test(value))?.[1].toLowerCase();
+    return filter === 'future' ? 'upcoming' : filter;
+  }
+
+  function upcomingControl(doc) {
+    const controls = [...doc.querySelectorAll('button:not([type]),button[type="button"],[role="tab"]')].filter((node) =>
+      exposed(node) && !node.disabled && (!node.closest('form') || node.getAttribute('type') === 'button') &&
+      (!node.hasAttribute('href') || node.getAttribute('href').startsWith('#')) &&
+      (upcomingLabel.test(txt(node)) || upcomingLabel.test(clean(node.getAttribute('aria-label')))));
+    return controls.length === 1 ? controls[0] : null;
+  }
+
+  const activeUpcoming = (control) => Boolean(control?.matches('[aria-selected="true"],[aria-current="page"],[aria-pressed="true"],.active'));
+
+  function workspaceUpcoming(doc, url, nodes, records) {
+    const control = upcomingControl(doc);
+    const target = control?.getAttribute('aria-controls');
+    const panel = (target ? doc.getElementById(target) : null) ??
+      doc.querySelector('[data-upcoming-tasks]') ?? doc.querySelector('main,[role="main"]') ?? doc.body;
+    const active = workspaceFilter(url) === 'upcoming' || activeUpcoming(control) || panel?.matches('[data-upcoming-tasks]');
+    const loading = !panel || !exposed(panel) || panel.matches(selectors.pagination) || panel.querySelector(selectors.pagination);
+    const empty = active && !loading && !nodes.length && [...panel.querySelectorAll(headingSelector + ',p')].some((node) =>
+      exposed(node) && /^no upcoming (?:tasks|assignments|assessments)(?: (?:found|scheduled|to display|at this time|yet))?[.!]?$/i.test(txt(node)));
+    const list = panel?.matches('[data-total-count]') ? panel : panel?.querySelector('[data-total-count]');
+    const total = numeric(list?.getAttribute('data-total-count'));
+    const counted = active && !loading && list && total === nodes.length && total === records.length &&
+      nodes.every((node) => list.contains(node)) && records.every((task) => task.due !== undefined);
+    return empty || counted ? 'complete' : records.some((task) => task.due !== undefined) ? 'partial' : 'unavailable';
+  }
+
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+
+  function parseDue(raw) {
+    const value = clean(raw).replace(/^due(?:\s+(?:on|date))?\s*:?\s*/i, '');
+    const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::\d{2}(?:\.\d{1,3})?)?(Z|[+-]\d{2}:?\d{2})?)?$/i);
+    let date, hour, minute;
+    if (iso) {
+      date = iso[1] + '-' + iso[2] + '-' + iso[3];
+      if (iso[6]) {
+        const timestamp = Date.parse(value.replace(' ', 'T'));
+        return Number.isFinite(timestamp) && new Date(date + 'T00:00:00Z').toISOString().slice(0, 10) === date ? timestamp : null;
+      }
+      [, , , , hour, minute] = iso;
+    } else {
+      const normalized = value.replace(/^(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?),?\s+/i, '');
+      const leadingMonth = normalized.match(/^([a-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})(.*)$/i);
+      const leadingDay = normalized.match(/^(\d{1,2})\s+([a-z]+)\.?,?\s+(\d{4})(.*)$/i);
+      const match = leadingMonth || leadingDay;
+      if (!match) return null;
+      const month = (leadingMonth ? match[1] : match[2]).toLowerCase();
+      const index = monthNames.findIndex((name) => name === month || name.slice(0, 3) === month || (name === 'september' && month === 'sept'));
+      if (index < 0) return null;
+      date = [match[3], String(index + 1).padStart(2, '0'), (leadingMonth ? match[2] : match[1]).padStart(2, '0')].join('-');
+      const suffix = match[4].replace(/^[,–—·•\s]+/, '').replace(/^at\s+/i, '');
+      if (suffix) {
+        const clock = suffix.match(/^(\d{1,2}):(\d{2})\s*([ap]m)?$/i);
+        if (!clock) return null;
+        [, hour, minute] = clock;
+        if (clock[3]) {
+          if (+hour < 1 || +hour > 12) return null;
+          hour = String(+hour % 12 + (/pm/i.test(clock[3]) ? 12 : 0));
+        }
+      }
+    }
+    const day = new Date(date + 'T00:00:00Z');
+    if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== date) return null;
+    if (hour === undefined) return date;
+    if (+hour > 23 || +minute > 59) return null;
+    const time = new Date(date + 'T' + hour.padStart(2, '0') + ':' + minute);
+    return time.getHours() === +hour && time.getMinutes() === +minute ? time.getTime() : null;
+  }
 
   function readDueDate(node) {
-    const due = node.querySelector('[data-due-at],[data-due-date],[data-due-datetime],.task-due-date,.due-date,.due-at,time[data-role="due"]');
-    const values = [node, due].flatMap((item) => ['data-due-at', 'data-due-datetime', 'data-due-date', 'datetime']
-      .map((attr) => item?.getAttribute(attr)));
-    values.push(due?.querySelector('time[datetime]')?.getAttribute('datetime'));
+    const nodes = [...node.querySelectorAll(dueSelector + ',time[datetime]')];
+    const values = [node, ...nodes.filter((item) => item.matches(dueSelector) || /\bdue\b/i.test(txt(item.parentElement)))]
+      .flatMap((item) => ['data-due-at', 'data-due-datetime', 'data-due-date', 'data-deadline', 'datetime']
+        .map((attr) => item.getAttribute(attr)));
+    for (const due of nodes.filter((item) => item.matches(dueSelector))) {
+      values.push(due.querySelector('time[datetime]')?.getAttribute('datetime'), txt(due));
+    }
+    if (/due(?:\s|:)/i.test(txt(node))) {
+      for (const item of node.querySelectorAll('td,dd,p,span,div,small,time')) {
+        if (item.childElementCount > 3) continue;
+        const text = txt(item);
+        if (/^due(?:[\s:]|$)/i.test(text)) values.push(text);
+        if (/^due(?: date)?\s*:?$/i.test(text)) values.push(txt(item.nextElementSibling));
+      }
+    }
     let dateOnly = null;
     for (const raw of values) {
-      const value = clean(raw);
-      if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/i.test(value)) continue;
-      const date = value.slice(0, 10);
-      const day = new Date(date + 'T00:00:00Z');
-      if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== date) continue;
-      if (/T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
-        const timestamp = Date.parse(value);
-        if (Number.isFinite(timestamp)) return timestamp;
-      } else dateOnly ??= date;
+      const value = parseDue(raw);
+      if (typeof value === 'number') return value;
+      dateOnly ??= value;
     }
     return dateOnly;
   }
@@ -455,8 +541,10 @@
     const declared = [...new Set(['data-task-id', 'data-assignment-id', 'data-assessment-id']
       .map((name) => node.getAttribute(name)).filter(Boolean))];
     if (declared.length > 1 || (linked && declared.length && declared[0] !== linked.taskId)) return null;
-    const taskId = linked?.taskId || (context.type === 'tasks' && stableOption(declared[0]));
-    const classId = linked?.classId || context.classId;
+    const declaredClass = node.getAttribute('data-class-id');
+    const workspaceClass = context.type === 'workspace' && /^[1-9]\d*$/.test(declaredClass ?? '') ? declaredClass : null;
+    const taskId = linked?.taskId || ((context.type === 'tasks' || workspaceClass) && stableOption(declared[0]));
+    const classId = linked?.classId || context.classId || workspaceClass;
     if (!taskId || !classId || (context.classId && classId !== context.classId) ||
       (node.hasAttribute('data-class-id') && node.getAttribute('data-class-id') !== classId)) return null;
     const termOwner = node.closest('[data-term-id],[data-academic-term-id],[data-semester-id]');
@@ -464,14 +552,17 @@
       termOwner?.getAttribute('data-semester-id')) || (context.type === 'tasks' || detail ? term.id : null);
     const labels = [...node.querySelectorAll('.labels-set .label')]
       .filter((label) => !label.closest(selectors.score)).map(txt).filter(Boolean);
+    const recognisedStatus = /^(?:submitted(?: late)?|completed|turned in|graded|not submitted|pending|upcoming)$/i;
+    const status = clean(node.getAttribute('data-status')) || firstText(node, '.submission-status, .task-status, [data-task-status]') ||
+      labels.find((label) => recognisedStatus.test(label)) || '';
     const assessmentType = clean(node.getAttribute('data-assessment-type')) ||
       labels.find((label) => /^(formative|summative)$/i.test(label)) || '';
     const subject = clean(node.getAttribute('data-subject')) ||
-      firstText(node, '.class-name, .subject-name, [data-class-name] a, a[href$="/classes/' + classId + '"]') ||
+      firstText(node, '.class-name, .subject-name, .task-subject, [data-class-name], a[href$="/classes/' + classId + '"]') ||
       classes[classId] || '';
     const weightedNames = new Set(Object.keys(weights).map(app.key));
     const categories = [...new Set(labels.filter((label) => app.key(label) !== app.key(subject) &&
-      (label !== assessmentType || weightedNames.has(app.key(label)))))];
+      !recognisedStatus.test(label) && (label !== assessmentType || weightedNames.has(app.key(label)))))];
     const recognized = categories.filter((label) => weightedNames.has(app.key(label)));
     const explicitCategory = clean(node.getAttribute('data-category')) || firstText(node, '.assessment-category, .task-category');
     const category = explicitCategory || (recognized.length === 1 ? recognized[0] : categories.length === 1 ? categories[0] : '');
@@ -511,7 +602,7 @@
       earnedPoints: scoreMatch?.[0] ?? null,
       maxPoints: scoreMatch?.[1] ?? null,
       displayedLetter,
-      status: firstText(node, '.submission-status, .task-status') ||
+      status: status ||
         (txt(score).match(/\b(not submitted|submitted|pending|ungraded)\b/i)?.[0] ?? ''),
       taskUrl: destination?.pathname ?? null,
       excluded, explicitlyUngraded, resultsLink, gradeKind: 'ungraded', issue: null
@@ -539,7 +630,7 @@
         item.getAttribute('data-max-points'))).find((value) => value > 0);
     if (due !== null) result.due = due;
     if (maximum) result.possiblePoints = maximum;
-    if (node.matches('[data-completed="true"]') || /^(?:submitted|completed|turned in|graded)$/i.test(result.status)) result.completed = true;
+    if (node.matches('[data-completed="true"]') || /^(?:submitted(?: late)?|completed|turned in|graded)$/i.test(result.status)) result.completed = true;
     else if (node.matches('[data-completed="false"]') || /^(?:not submitted|pending|upcoming)$/i.test(result.status)) result.completed = false;
     return result;
   }
@@ -605,6 +696,9 @@
         records.set(key, previous ? { ...previous, ...task, subject: task.subject || previous.subject,
           assessmentType: task.assessmentType || previous.assessmentType, category: task.category || previous.category,
           displayedLetter: task.displayedLetter || previous.displayedLetter, status: task.status || previous.status } : task);
+      } else if (previous && !app.validScore(task)) {
+        records.set(key, { ...previous, due: previous.due ?? task.due, possiblePoints: previous.possiblePoints ?? task.possiblePoints,
+          completed: previous.completed ?? task.completed });
       }
       if (task.subject && !found.classes[task.classId]) found.classes[task.classId] = task.subject;
     }
@@ -640,10 +734,11 @@
     };
     return {
       ...found, context, term, weights, scale, records: assessments, complete, diagnostic,
+      upcomingCoverage: context.type === 'workspace' && workspaceFilter(url) !== 'past' ? workspaceUpcoming(doc, url, nodes, assessments) : undefined,
       readable: Boolean(assessments.length || complete || Object.keys(weights).length || scale),
       at: Date.now()
     };
   }
 
-  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, selfProfile, profileEmail, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks, taskDestination, taskMetadata });
+  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, selfProfile, profileEmail, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks, taskDestination, taskMetadata, workspaceFilter, upcomingControl, activeUpcoming });
 })();

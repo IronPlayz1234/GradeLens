@@ -423,7 +423,7 @@
   const chartRoots = 'canvas,svg,[data-chart],.chart-frame,.highcharts-container';
   const relevant = [gradeRoots, app.taskMetadata, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
     app.discoveryLinks, app.accountLinks, 'a[href*="/core_tasks/"],a[href*="/tasks/"]', 'table,thead,h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4,.title',
-    '[data-task-list],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
+    '[data-task-list],[data-upcoming-tasks],[role="tabpanel"],[role="tab"][aria-controls],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
   const structure = relevant + ',main,[role="main"],#content,[data-all-tasks]';
   const scoreAttributes = new Set(['data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade']);
 
@@ -464,7 +464,7 @@
   observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
     attributeFilter: ['data-selected-term-id', 'data-term-id', 'data-total-count', 'class', 'style', 'hidden', 'aria-hidden',
       'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme',
-      'datetime', 'data-due-at', 'data-due-date', 'data-due-datetime', 'data-completed', 'data-possible-points', 'data-total-points'] });
+      'datetime', 'data-due-at', 'data-due-date', 'data-due-datetime', 'data-deadline', 'data-status', 'data-completed', 'data-possible-points', 'data-total-points'] });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   window.addEventListener('popstate', reconcile);
   window.addEventListener('hashchange', reconcile);
