@@ -282,14 +282,8 @@ a > .mbgc-sidebar-grade {
 .mbgc-search-result { margin-bottom: 8px !important; }
 .mbgc-search-result:empty { display: none; }
 .mbgc-owned .mbgc-assessment-link svg { width: 13px; height: 13px; margin-inline-start: 4px; vertical-align: -.12em; }
-.mbgc-upcoming, .mbgc-welcome { margin-block: 18px; }
-.mbgc-upcoming > h2, .mbgc-welcome > h2 { margin-bottom: 8px; }
-.mbgc-upcoming-list { list-style: none; max-block-size: 300px; overflow: auto; padding: 0 3px; margin: 0; }
-.mbgc-upcoming-task { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; padding-block: 9px; }
-.mbgc-upcoming-task + .mbgc-upcoming-task { border-top: 1px solid var(--mbgc-border); }
-.mbgc-upcoming-task > div { flex: 1 1 16ch; min-width: 0; overflow-wrap: anywhere; }
-.mbgc-owned :is(.mbgc-upcoming-note, .mbgc-upcoming-context) { margin-top: 8px; }
-.mbgc-upcoming-context { color: var(--mbgc-ink) !important; font-weight: 650; overflow-wrap: anywhere; }
+.mbgc-welcome { margin-block: 18px; }
+.mbgc-welcome > h2 { margin-bottom: 8px; }
 .mbgc-appearance { display: grid; gap: 10px; padding-block: 0 15px; margin-bottom: 14px; border-bottom: 1px solid var(--mbgc-border); }
 .mbgc-appearance > button { justify-self: start; }
 .mbgc-appearance-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; align-items: end; }
@@ -301,7 +295,7 @@ a > .mbgc-sidebar-grade {
 .mbgc-welcome-sections ul { margin: 5px 0 0; padding-inline-start: 17px; font-size: 12px; }
 .mbgc-owned .mbgc-welcome-note { padding: 8px 10px; margin-bottom: 12px; border-radius: 7px; background: var(--mbgc-tint); font-weight: 640; }
 .mbgc-owned[data-density="compact"] .mbgc-subject-summary { min-height: 56px; padding-block: 7px; }
-.mbgc-owned[data-density="compact"] :is(.mbgc-assessment, .mbgc-upcoming-task, .mbgc-compact) { padding-block: 5px; }
+.mbgc-owned[data-density="compact"] :is(.mbgc-assessment, .mbgc-compact) { padding-block: 5px; }
 .mbgc-owned[data-density="compact"] :is(.mbgc-panel, .mbgc-prediction) { padding-block: 12px; }
 .mbgc-owned[data-progress-bars="false"] .mbgc-track { display: none !important; }
 .mbgc-owned[data-motion="reduced"] *, .mbgc-owned[data-motion="reduced"] *::before, .mbgc-owned[data-motion="reduced"] *::after {

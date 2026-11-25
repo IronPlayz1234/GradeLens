@@ -86,13 +86,6 @@
     details.addEventListener('toggle', () => { view.diagnosticsOpen = details.open; });
     details.append(h('summary', '', 'Sync details', h('span', 'mbgc-chevron', icon('chevron'))));
     details.append(h('p', 'mbgc-muted', 'Extension version ' + chrome.runtime.getManifest().version));
-    const upcoming = Object.values(sync.cache.sourceChecks ?? {}).filter((check) => check.upcomingCoverage)
-      .sort((a, b) => b.at - a.at)[0];
-    const read = upcoming?.upcomingRead;
-    details.append(h('p', 'mbgc-muted', read
-      ? `Upcoming check · ${read.mode} · ${read.rows} candidate rows · ${read.dated} recognized deadlines${upcoming.renderedAt && read.mode !== 'rendered page' ? ' · rendered read unavailable' : ''}`
-      : upcoming ? 'Upcoming check · Tasks & Deadlines could not be read.'
-        : 'Upcoming check · Tasks & Deadlines has not been checked yet.'));
     const storage = sync.storageState === 'session' ? 'Verified student grade cache' :
       sync.storageState === 'unavailable' ? 'Grade cache unavailable · current document only' :
         'Current document only · student identity could not be verified';
@@ -494,38 +487,11 @@
     return panel;
   }
 
-  function upcomingPanel(sync, view, handlers) {
-    const tasks = app.upcomingTasks(sync.cache, view.term);
-    view.nextDue = tasks[0]?.expiresAt;
-    const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-    const day = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-    const list = h('ul', 'mbgc-upcoming-list', tasks.map((task) => {
-      const due = typeof task.due === 'number' ? time.format(task.due) : day.format(new Date(task.due + 'T12:00:00'));
-      const meta = [task.subject, 'Due ' + due, task.category, task.status, task.possiblePoints ? number(task.possiblePoints, 6) + ' points' : ''].filter(Boolean);
-      const tryGrade = button('Try a grade', () => handlers.tryTask(task), 'estimator');
-      tryGrade.setAttribute('aria-label', 'Try a grade for ' + task.title);
-      return h('li', 'mbgc-upcoming-task', h('div', '', h('strong', '', taskTitle(task)),
-        h('p', 'mbgc-muted', meta.join(' · '))), tryGrade);
-    }));
-    const maxAge = Math.max(15, sync.settings.refreshMinutes * 2) * 60000;
-    const checked = Object.values(sync.cache.sourceChecks ?? {}).some((check) =>
-      check.upcomingCoverage === 'complete' && Date.now() - check.at <= maxAge &&
-      (view.term === app.currentTerms || 'term:' + check.termId === view.term));
-    const summary = sync.refreshing || !sync.context ? 'Checking upcoming assignments…' : tasks.length ?
-      (checked ? '' : 'Some upcoming assignments may be missing.') : checked ?
-        'No upcoming assignments in the checked schedule.' :
-        'Upcoming assignments could not be fully checked. Try Refresh now or open Tasks & Deadlines.';
-    const status = summary ? h('p', 'mbgc-muted mbgc-upcoming-note', summary) : null;
-    if (status) status.setAttribute('role', 'status');
-    return h('section', 'mbgc-panel mbgc-upcoming', h('h2', '', 'Upcoming Assessments'), tasks.length ? list : null, status);
-  }
-
   function header(sync, kind, view, handlers, termOptions) {
     const isEstimator = kind === 'estimator';
     const termChoice = select(termOptions, view.term, (id) => {
       view.term = id;
       view.scenario = null;
-      view.upcomingTask = null;
       handlers.render();
     });
     termChoice.disabled = !termOptions.length;
@@ -582,7 +548,6 @@
       const checked = new Set(Object.values(sync.cache.sourceChecks ?? {}).filter((check) =>
         check.at >= sync.lastAttempt && sync.cache.classes[check.classId]).map((check) => check.classId));
       content.append(gradeLoading(classes.length, checked.size));
-      content.append(upcomingPanel(sync, view, handlers));
       return content;
     }
     content.append(
@@ -595,8 +560,7 @@
       recovery.append(button('Retry', () => sync.refresh(true), 'refresh'));
       content.append(recovery);
     }
-    content.append(upcomingPanel(sync, view, handlers),
-      h('p', 'mbgc-footnote', 'The school’s term calculation method and letter scale are unverified. Partial scans can miss assessments.'),
+    content.append(h('p', 'mbgc-footnote', 'The school’s term calculation method and letter scale are unverified. Partial scans can miss assessments.'),
       settings(sync, classes.map(([id, item]) => [id, item.name || 'Class ' + id]), view, handlers));
     return content;
   }
@@ -650,7 +614,6 @@
     const choice = select(subjects, view.classId, (id) => {
       view.classId = id;
       view.scenario = null;
-      view.upcomingTask = null;
       handlers.render();
     });
     page.append(h('div', 'mbgc-estimator-subject', field('Subject', choice)));
@@ -673,15 +636,7 @@
         target: 80, targetMode: 'percentage', targetLetter: data.scale.find(([min]) => min <= 80)?.[1] ?? data.scale[0][1] };
     }
     const model = view.scenario ??= defaults();
-    if (view.upcomingTask?.classId === view.classId) {
-      const task = view.upcomingTask;
-      const actual = data.tasks.find((item) => item.id === task.id && app.validScore(item));
-      const category = actual?.category || task.category;
-      Object.assign(model, { title: task.title, points: NaN, max: actual?.maxPoints ?? task.possiblePoints ?? NaN,
-        pick: categories.find((name) => app.key(name) === app.key(category)) ?? '', replaces: actual?.id ?? '' });
-      view.upcomingTask = null;
-    }
-    if (!categories.includes(model.pick)) model.pick = model.title ? '' : firstCategory;
+    if (!categories.includes(model.pick)) model.pick = firstCategory;
     const replaceable = data.tasks.filter((task) => app.validScore(task) &&
       categories.some((name) => app.key(name) === app.key(task.category)) &&
       !model.entries.some((entry) => entry.id !== model.editing && entry.replaces === task.id));
@@ -893,7 +848,6 @@
           h('div', 'mbgc-panel-heading', h('span', 'mbgc-mark', icon('estimator')), h('div', '', h('h2', '', 'Try a grade'),
             h('p', 'mbgc-muted', 'What would you like to do?'))),
           mode,
-          model.title ? h('p', 'mbgc-upcoming-context', model.title) : null,
           h('p', 'mbgc-mode-help mbgc-muted', model.replaces
             ? 'Preview a different score for an assessment you’ve already taken.'
             : 'See how one more assessment could change your grade.'),

@@ -306,14 +306,6 @@
         if (!force && editor?.matches('textarea') && stage.contains(editor)) return;
         const handlers = {
           close: closeView, render: () => render(true),
-          tryTask: (task) => {
-            view.classId = task.classId;
-            if (task.termKey === 'unknown') view.term = app.currentTerms;
-            view.scenario = null;
-            view.upcomingTask = task;
-            openView('#mbgc-grade-estimator');
-            (stage.querySelector('.mbgc-model input[type="number"]') ?? stage.querySelector('.mbgc-estimator-subject select'))?.focus();
-          },
           showWelcome: () => {
             view.welcomeOpen = true;
             render(true);
@@ -421,9 +413,9 @@
 
   const gradeRoots = [app.selectors.tasks, app.selectors.score, app.selectors.points, app.selectors.letter, app.selectors.rubric].join(',');
   const chartRoots = 'canvas,svg,[data-chart],.chart-frame,.highcharts-container';
-  const relevant = [gradeRoots, app.taskMetadata, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
+  const relevant = [gradeRoots, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
     app.discoveryLinks, app.accountLinks, 'a[href*="/core_tasks/"],a[href*="/tasks/"]', 'table,thead,h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4,.title',
-    '[data-task-list],[data-upcoming-tasks],[role="tabpanel"],[role="tab"][aria-controls],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
+    '[data-task-list],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
   const structure = relevant + ',main,[role="main"],#content,[data-all-tasks]';
   const scoreAttributes = new Set(['data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade']);
 
@@ -463,8 +455,7 @@
   const observer = new MutationObserver(handleMutations);
   observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
     attributeFilter: ['data-selected-term-id', 'data-term-id', 'data-total-count', 'class', 'style', 'hidden', 'aria-hidden',
-      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme',
-      'datetime', 'data-due-at', 'data-due-date', 'data-due-datetime', 'data-deadline', 'data-status', 'data-completed', 'data-possible-points', 'data-total-points'] });
+      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   window.addEventListener('popstate', reconcile);
   window.addEventListener('hashchange', reconcile);
@@ -496,11 +487,6 @@
   window.addEventListener('resize', scheduleRender);
   setInterval(() => {
     if (location.href !== lastURL) reconcile();
-    if (!document.hidden && views[location.hash] === 'grades' && Date.now() >= view.nextDue) {
-      view.nextDue = undefined;
-      viewKey = '';
-      scheduleRender();
-    }
     if (!document.hidden && app.studentPath(location.pathname)) sync.refresh();
   }, 15000);
   void isolateDashboard().catch(() => {});

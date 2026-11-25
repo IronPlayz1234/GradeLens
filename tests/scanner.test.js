@@ -367,36 +367,6 @@ test('background parser identifies a still-rendered previous term under the new 
   assert.equal(snapshot.complete, false);
 });
 
-test('upcoming tasks use verified deadlines and deduplicate task records without creating scores', () => {
-  const doc = fixture('class-tasks');
-  const list = doc.querySelector('[data-task-list]');
-  const add = (id, attributes, body = '') => list.insertAdjacentHTML('beforeend',
-    `<article class="task-card" ${attributes}><a href="/student/classes/123/core_tasks/${id}">Task ${id}</a>${body}</article>`);
-  add(101, 'data-category="Coursework" data-possible-points="40"', '<p class="due-date"><time datetime="2035-11-21T23:30:00-05:00"></time></p>');
-  add(102, 'data-due-at="2035-11-22T01:00:00+02:00"');
-  add(103, 'data-due-at="2035-11-23" data-completed="true"');
-  add(104, 'data-due-at="2035-11-23"');
-  add(105, 'data-due-at="2035-02-30"');
-  add(106, 'data-due-at="2035-11-23"', '<span class="points">10 / 20</span>');
-  add(107, '');
-  const snapshot = app.scan(doc, tasksURL);
-  const cache = app.freshCache();
-  app.mergeScan(cache, { ...snapshot, visible: true });
-  const current = cache.classes['123'].terms['term:71'];
-  assert.equal(current.records['101'].due, Date.parse('2035-11-22T04:30:00Z'));
-  assert.equal(current.records['101'].maxPoints, null);
-  assert.equal(current.records['101'].possiblePoints, 40);
-  assert.equal(current.records['105'].due, undefined);
-  cache.classes['123'].terms.unknown = { records: { 101: { ...current.records['101'], termId: null } } };
-  const upcoming = app.upcomingTasks(cache, app.currentTerms, Date.parse('2035-11-22T02:00:00Z'));
-  assert.deepEqual(upcoming.map(({ id }) => id), ['101', '104']);
-  assert.equal(upcoming[1].possiblePoints, undefined);
-  assert.equal(upcoming[1].category, undefined);
-  assert.deepEqual(app.upcomingTasks(cache, 'term:72', Date.parse('2035-11-22T02:00:00Z')), []);
-  assert.equal(app.upcomingTasks(cache, 'term:71', new Date(2035, 10, 23, 20).getTime()).at(-1)?.id, '104');
-  assert.deepEqual(app.upcomingTasks(cache, 'term:71', new Date(2035, 10, 24, 0).getTime()), []);
-});
-
 test('assessment destinations require a collected link and matching IDs on the school origin', () => {
   const task = { classId: '123', id: '1', taskUrl: '/student/classes/123/core_tasks/1' };
   assert.equal(app.taskDestination(task, tasksURL).href, tasksURL.href + '/1');
@@ -405,46 +375,4 @@ test('assessment destinations require a collected link and matching IDs on the s
     '/student/classes/123/core_tasks/1?next=example.org']) {
     assert.equal(app.taskDestination({ ...task, taskUrl }, tasksURL), null);
   }
-});
-
-test('pending workspace rows without score markup retain the November 20 local deadlines', () => {
-  const url = new URL(host + '/student/tasks_and_deadlines?tab=upcoming');
-  const doc = parseHTML(`<main><section data-upcoming-tasks data-total-count="4">
-    <article><a href="/student/classes/123/core_tasks/121">Quadratics</a>
-      <span class="task-subject">Mathematics AS</span><p>Due: November 20, 2026 at 8:00 AM</p>
-      <span class="task-status">Pending</span><span class="task-category">Coursework</span></article>
-    <div><a href="/student/classes/123/core_tasks/122">Functions</a><div class="due-date">Fri, 20 Nov 2026, 08:00</div></div>
-    <article><a href="/student/classes/123/core_tasks/123">Trigonometry</a>
-      <time data-role="due" datetime="2026-11-20T08:00:00+09:00">20 Nov</time></article>
-    <article data-status="Completed"><a href="/student/classes/123/core_tasks/124">Series</a>
-      <div class="due-date">2026-11-20T08:00:00</div></article>
-    </section></main>`).document;
-  const scan = app.scan(doc, url);
-  assert.equal(scan.upcomingCoverage, 'complete');
-  assert.equal(scan.diagnostic.points, 0);
-  assert.equal(scan.records[0].due, new Date(2026, 10, 20, 8).getTime());
-  assert.equal(scan.records[1].due, scan.records[0].due);
-  assert.equal(scan.records[2].due, Date.parse('2026-11-19T23:00:00Z'));
-  assert.equal(scan.records[3].due, scan.records[0].due);
-  assert.equal(scan.records[0].status, 'Pending');
-  assert.equal(scan.records[0].subject, 'Mathematics AS');
-  assert.equal(scan.records[0].category, 'Coursework');
-  const cache = app.freshCache();
-  app.mergeScan(cache, scan);
-  const now = Math.min(...scan.records.map((task) => task.due)) - 60000;
-  assert.deepEqual(app.upcomingTasks(cache, app.currentTerms, now).map(({ id }) => id).sort(), ['121', '122', '123']);
-  assert.equal(app.upcomingTasks(cache, app.currentTerms, Math.max(...scan.records.map((task) => task.due))).length, 0);
-});
-
-test('workspace shells and partial schedules cannot prove the upcoming list is empty', () => {
-  const url = new URL(host + '/student/tasks_and_deadlines');
-  const state = (html, page = url) => app.scan(parseHTML(html).document, page).upcomingCoverage;
-  assert.equal(state('<main><button type="button">Upcoming</button></main>'), 'unavailable');
-  assert.equal(state('<main><section data-upcoming-tasks hidden><p>No upcoming assignments.</p></section></main>'), 'unavailable');
-  assert.equal(state('<main><section data-upcoming-tasks aria-busy="true"><p>No upcoming assignments.</p></section></main>'), 'unavailable');
-  assert.equal(state('<main><section data-upcoming-tasks><p>No upcoming assignments.</p></section></main>'), 'complete');
-  assert.equal(state('<main><strong>No upcoming assignments.</strong></main>', new URL(url + '?tab=past')), undefined);
-  const discover = app.scan(parseHTML('<main><a href="?tab=upcoming">Upcoming Tasks (5)</a></main>').document, url);
-  // Native workspace filters may use a relative query link.
-  assert.ok(discover.sources.includes('/student/tasks_and_deadlines?tab=upcoming'));
 });
