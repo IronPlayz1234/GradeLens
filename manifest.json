@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ManageBac Grade Calculator",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Private, local grade estimates and what-if planning for ManageBac students.",
   "permissions": ["storage"],
   "host_permissions": ["https://uia.managebac.com/*"],

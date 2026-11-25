@@ -206,3 +206,27 @@ test('explicit grade eligibility and graded state are independent of submission 
   assert.equal(snapshot.records[1].excluded, true);
   assert.equal(app.calculate(snapshot.records, snapshot.weights).count, 2);
 });
+
+test('discovers and calculates a mixed roster from class-specific point evidence and grading categories', () => {
+  const { subjects, tasksPath, tasksPage, rosterPage } = require('./fixtures/subjects');
+  const roster = app.scan(parseHTML(rosterPage()).document, new URL(host + '/student/classes'));
+  const cache = app.freshCache();
+  app.mergeScan(cache, roster);
+  for (const subject of subjects) {
+    const path = tasksPath(subject);
+    assert.ok(roster.sources.includes(path), subject.name);
+    assert.equal(roster.classes[subject.id], subject.name);
+    const scan = app.scan(parseHTML(tasksPage(subject)).document, new URL(host + path));
+    assert.deepEqual(scan.weights, Object.fromEntries(subject.categories), subject.name);
+    assert.deepEqual(scan.records.map((task) => task.gradeKind), subject.kinds, subject.name);
+    assert.ok(scan.records.every((task) => task.classId === subject.id), subject.name);
+    app.mergeScan(cache, { ...scan, defaultTerm: true });
+    const stored = cache.classes[subject.id];
+    const bucket = stored.terms[app.classTermKey(stored)];
+    for (const [method, expected] of Object.entries(subject.grades)) {
+      const { percentage } = app.calculate(Object.values(bucket.records), bucket.weights, method);
+      if (expected === null) assert.equal(percentage, null, subject.name + ' ' + method);
+      else assert.ok(Math.abs(percentage - expected) < 1e-9, subject.name + ' ' + method + ': ' + percentage);
+    }
+  }
+});

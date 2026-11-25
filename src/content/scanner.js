@@ -7,9 +7,11 @@
   const termParams = ['term_id', 'academic_term_id', 'semester_id', 'reporting_period_id', 'term', 'semester'];
   const headingSelector = 'h1,h2,h3,h4,h5,[role="heading"],.h2,.h3,.h4,.section-title,.panel-title,.card-title,div,span,strong';
   const selectors = {
-    tasks: '.short-assignment, .task-card, .assignment-card, [data-task-id], [data-assignment-id]',
-    score: '.assessment-cell, .task-score, .assessment-score, [data-task-score]',
-    points: '.points, .score-points, .marks, [data-earned-points][data-max-points]',
+    tasks: '.short-assignment, .task-card, .assignment-card, .assessment-card, [data-task-id], [data-assignment-id], [data-assessment-id]',
+    score: '.assessment-cell, .task-score, .assessment-score, [data-task-score], [data-assessment-score]',
+    letter: '.grade, .letter-grade, [data-letter-grade]',
+    rubric: '[data-rubric], .rubric, .assessment-rubric, [data-criterion], [data-criterion-id], .rubric-criterion',
+    points: '.points, .score-points, .marks, [data-earned-points], [data-max-points]',
     termControls: 'select, [role="combobox"], [aria-haspopup], [data-selected-term-id], [data-term-id][aria-selected], [data-semester-id][aria-selected]',
     term: 'select[name="term_id"], select[name="term"], select[name="academic_term_id"], select[name="semester_id"], select[name="semester"], select#term_id, select#academic_term_id, select#semester_id, [data-selected-term-id]',
     pagination: '.pagination, [rel="next"], [data-load-more], [aria-busy="true"], [data-loading="true"]',
@@ -336,7 +338,7 @@
 
   function taskNodes(doc, url) {
     const known = [...doc.querySelectorAll(selectors.tasks)].filter(exposed);
-    const nodes = new Set(known.filter((node) => !node.matches('[data-task-id], [data-assignment-id]') ||
+    const nodes = new Set(known.filter((node) => !node.matches('[data-task-id], [data-assignment-id], [data-assessment-id]') ||
       ['DIV', 'LI', 'ARTICLE', 'SECTION', 'TR'].includes(node.tagName)));
     for (const link of doc.querySelectorAll(assessmentLinks)) {
       const destination = localURL(link.getAttribute('href'), url);
@@ -349,7 +351,10 @@
           return target && route(target).type === 'task';
         });
         if (links.some((item) => localURL(item.getAttribute('href'), url).pathname !== destination.pathname)) break;
-        if (row.querySelector(selectors.score)) { nodes.add(row); break; }
+        if (row.matches('tr,[role="row"]') || row.querySelector([selectors.score, selectors.points, selectors.letter, selectors.rubric].join(','))) {
+          nodes.add(row);
+          break;
+        }
       }
     }
     return [...nodes];
@@ -366,34 +371,41 @@
       termOwner?.getAttribute('data-semester-id')) || (context.type === 'tasks' ? term.id : null);
     const labels = [...node.querySelectorAll('.labels-set .label')]
       .filter((label) => !label.closest(selectors.score)).map(txt).filter(Boolean);
-    const assessmentType = labels.find((label) => /^(formative|summative)$/i.test(label)) ?? '';
+    const assessmentType = clean(node.getAttribute('data-assessment-type')) ||
+      labels.find((label) => /^(formative|summative)$/i.test(label)) || '';
     const subject = clean(node.getAttribute('data-subject')) ||
       firstText(node, '.class-name, .subject-name, [data-class-name] a, a[href$="/classes/' + classId + '"]') ||
       classes[classId] || '';
-    const categories = [...new Set(labels.filter((label) => label !== assessmentType && app.key(label) !== app.key(subject)))];
-    const recognized = categories.filter((label) => Object.keys(weights).some((name) => app.key(name) === app.key(label)));
+    const weightedNames = new Set(Object.keys(weights).map(app.key));
+    const categories = [...new Set(labels.filter((label) => app.key(label) !== app.key(subject) &&
+      (label !== assessmentType || weightedNames.has(app.key(label)))))];
+    const recognized = categories.filter((label) => weightedNames.has(app.key(label)));
     const explicitCategory = clean(node.getAttribute('data-category')) || firstText(node, '.assessment-category, .task-category');
     const category = explicitCategory || (recognized.length === 1 ? recognized[0] : categories.length === 1 ? categories[0] : '');
-    const scores = [...node.querySelectorAll(selectors.score)].filter(exposed);
+    const outsideRubric = (element) => exposed(element) && !element.closest(selectors.rubric);
+    const scores = [...node.querySelectorAll(selectors.score)].filter(outsideRubric);
     const score = scores[0];
-    const points = [...new Set(scores.flatMap((item) => [
-      ...(item.matches(selectors.points) ? [item] : []), ...item.querySelectorAll(selectors.points)
-    ]))].filter(exposed);
+    const points = [...node.querySelectorAll(selectors.points)].filter((item) => outsideRubric(item) &&
+      (!item.querySelector(selectors.rubric) || item.hasAttribute('data-earned-points')));
+    if (node.matches(selectors.points) && outsideRubric(node)) points.push(node);
     const pointsText = /^(\d+(?:\.\d+)?)\s*(?:\/|out of)\s*(\d+(?:\.\d+)?)\s*(?:pts?\.?|points?|marks?)?$/i;
-    const parsed = points.map((item) => {
-      if (item.hasAttribute('data-earned-points') && item.hasAttribute('data-max-points')) {
-        return [numeric(item.getAttribute('data-earned-points')), numeric(item.getAttribute('data-max-points'))];
-      }
-      return txt(item).match(pointsText)?.slice(1).map(Number);
-    });
+    const parse = (item) => item.hasAttribute('data-earned-points') || item.hasAttribute('data-max-points')
+      ? [numeric(item.getAttribute('data-earned-points')), numeric(item.getAttribute('data-max-points'))]
+      : txt(item).match(pointsText)?.slice(1).map(Number);
+    const parsed = points.map(parse);
     if (!points.length) {
       for (const item of scores) {
-        const match = txt(item).match(pointsText);
-        if (match) parsed.push(match.slice(1).map(Number));
+        // Don't interpret a criterion's points as the assignment's total.
+        if (item.querySelector(selectors.rubric)) continue;
+        const match = parse(item);
+        if (match) parsed.push(match);
       }
     }
     const first = parsed[0];
     const scoreMatch = first && parsed.every((match) => match?.[0] === first[0] && match?.[1] === first[1]) ? first : null;
+    const letterNode = [...node.querySelectorAll(selectors.letter)].find(outsideRubric);
+    const displayedLetter = clean(letterNode?.getAttribute('data-letter-grade')) || txt(letterNode);
+    const rubric = [...node.querySelectorAll(selectors.rubric)].some(exposed);
     const explicitlyUngraded = Boolean(score?.matches('[data-graded="false"]') || node.matches('[data-graded="false"]'));
     const excluded = node.matches('[data-grade-eligible="false"],[data-counts-toward-grade="false"]');
     const result = {
@@ -401,21 +413,28 @@
       title: txt(link) || `Assessment ${match[3]}`,
       earnedPoints: scoreMatch?.[0] ?? null,
       maxPoints: scoreMatch?.[1] ?? null,
-      displayedLetter: firstText(score ?? node, '.grade'),
+      displayedLetter,
       status: firstText(node, '.submission-status, .task-status') ||
         (txt(score).match(/\b(not submitted|submitted|pending|ungraded)\b/i)?.[0] ?? ''),
       taskUrl: destination.pathname,
-      excluded, explicitlyUngraded, issue: null
+      excluded, explicitlyUngraded, gradeKind: 'ungraded', issue: null
     };
     if (explicitlyUngraded) {
       result.earnedPoints = null;
       result.maxPoints = null;
     } else if (!app.validScore(result)) {
-      if (points.length || (result.displayedLetter && !/^(?:n\/a|pending|ungraded|[—–-])$/i.test(result.displayedLetter))) result.issue = 'Points unavailable or invalid';
+      const hasLetter = /^[A-Z]{1,2}[*+−-]?$/i.test(displayedLetter);
+      result.gradeKind = points.length || parsed.length ? 'invalid' : rubric ? 'rubric' : hasLetter ? 'letter' : 'ungraded';
+      if (result.gradeKind !== 'ungraded') result.issue = {
+        invalid: 'Points unavailable or invalid',
+        rubric: 'Rubric criteria without assignment points',
+        letter: 'Letter grade without assignment points'
+      }[result.gradeKind];
       result.earnedPoints = null;
       result.maxPoints = null;
-    } else if (!category) {
-      result.issue = 'Category unavailable or ambiguous';
+    } else {
+      result.gradeKind = 'points';
+      if (!category) result.issue = 'Category unavailable or ambiguous';
     }
     return result;
   }

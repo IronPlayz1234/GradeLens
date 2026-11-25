@@ -129,7 +129,7 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     await waitText('.mbgc-compact .mbgc-numeral', '76.92%');
     await waitText('.mbgc-compact-note', 'Grade updated');
     await page.locator('select[name="term_id"]').selectOption('72');
-    await waitText('.mbgc-compact .mbgc-numeral', '—');
+    await waitText('.mbgc-compact .mbgc-numeral', 'No grade available');
     await page.evaluate(() => {
       const list = document.querySelector('[data-task-list]');
       list.dataset.termId = '72';
@@ -164,7 +164,7 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
 
     account = '19';
     await second.reload();
-    await second.waitForFunction(() => document.querySelector('.mbgc-compact .mbgc-numeral')?.textContent === '—');
+    await second.waitForFunction(() => document.querySelector('.mbgc-compact .mbgc-numeral')?.textContent === 'No grade available');
     const stored = await worker.evaluate(() => chrome.storage.session.get('mbgc:cache:uia.managebac.com:9'));
     assert.ok(stored['mbgc:cache:uia.managebac.com:9']);
     assert.deepEqual(pageErrors, []);
@@ -290,9 +290,9 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
 
     useLettersOnly = true;
     await page.goto(host + tasksPath);
-    await page.locator('.mbgc-compact').getByText(/letter grades alone cannot produce a percentage/i).waitFor();
+    await page.locator('.mbgc-compact').getByText(/letter grades or rubric criteria alone cannot produce a percentage/i).waitFor();
     await page.getByRole('link', { name: 'Overall Grades' }).click();
-    await page.getByText(/letter grades alone cannot produce a percentage/i).waitFor();
+    await page.getByText(/letter grades or rubric criteria alone cannot produce a percentage/i).waitFor();
     await page.getByText('Sync diagnostics', { exact: true }).click();
     await page.getByText(/current document only · student identity/i).waitFor();
   } finally {
@@ -437,6 +437,50 @@ test('automatically discovers enrolled classes, keeps PE consistent, and coalesc
     await peRow.getByText(/No task rows in the returned page/).waitFor();
     await peRow.getByText(/Last successful sync/).waitFor();
     assert.deepEqual(requests.get(mathPath), [undefined, '"math-v1"']);
+  } finally {
+    await context.close();
+    await fs.rm(userData, { recursive: true, force: true });
+  }
+});
+
+test('mixed subjects sync from the roster and distinguish no grade from a genuine zero', { timeout: 30000 }, async () => {
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-subjects-'));
+  const context = await chromium.launchPersistentContext(userData, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root],
+    viewport: { width: 1160, height: 820 }
+  });
+  try {
+    const { subjects, page, tasksPath, tasksPage, rosterPage } = require('./fixtures/subjects');
+    const paths = new Map(subjects.map((subject) => [tasksPath(subject), subject]));
+    await context.route(host + '/**', (intercepted) => {
+      const pathname = new URL(intercepted.request().url()).pathname;
+      const subject = paths.get(pathname);
+      const body = pathname === '/student/classes' ? rosterPage() : subject ? tasksPage(subject) : page('<h1>Workspace</h1>');
+      return intercepted.fulfill({ contentType: 'text/html', body });
+    });
+    context.setDefaultTimeout(8000);
+    const tab = await context.newPage();
+    await tab.goto(host + '/student/dashboard');
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    const row = (name) => tab.locator('.mbgc-subject').filter({ has: tab.getByRole('heading', { name, exact: true }) });
+    for (const method of ['percentage', 'points', 'absolute']) {
+      await tab.getByLabel('Calculation method').selectOption(method);
+      for (const { name, grades } of subjects) {
+        const expected = grades[method] === null ? 'No grade available' : grades[method].toFixed(2) + '%';
+        await row(name).locator('.mbgc-numeral', { hasText: expected }).waitFor();
+      }
+    }
+    await row('Art').locator('summary').click();
+    await row('Art').getByText('Rubric only', { exact: true }).waitFor();
+    await row('English Literature').locator('summary').click();
+    await row('English Literature').getByText('A− (letter only)', { exact: true }).waitFor();
+    const art = subjects.find(({ name }) => name === 'Art');
+    await tab.goto(host + tasksPath(art));
+    await tab.locator('.mbgc-compact').getByText('No grade available', { exact: true }).waitFor();
+    await tab.getByRole('link', { name: 'Grade Estimator' }).click();
+    await tab.getByLabel('Subject').selectOption(art.id);
+    await tab.locator('.mbgc-actual').getByText('No grade available', { exact: true }).waitFor();
   } finally {
     await context.close();
     await fs.rm(userData, { recursive: true, force: true });

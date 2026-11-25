@@ -67,7 +67,7 @@
       : 'No assessment rows detected on this page. Load the native task list or open Tasks & Deadlines → Past.';
     if (scan.page === 'tasks' && !scan.term) return 'The selected class term has no recognized identifier. Switch terms in the native selector and check Sync diagnostics.';
     if (!scan.points) return scan.scoreIssues
-      ? 'Grades are displayed, but no usable earned and maximum points were detected. Letter grades alone cannot produce a percentage.'
+      ? 'Grades are displayed, but no usable earned and maximum points were detected. Letter grades or rubric criteria alone cannot produce a percentage.'
       : 'Assessments were read. No graded points are available yet.';
     if (scan.unassigned) return 'Some scored tasks have no verified term and were excluded. Open the corresponding Class Tasks page.';
     if (scan.page === 'tasks' && !scan.weights) return 'Scored tasks were read. Open ManageBac’s category weights panel or enter verified weights in Overall Grades → Settings.';
@@ -120,7 +120,10 @@
 
   function score(value, scale, className = '') {
     const label = app.letter(value, scale);
-    return h('div', 'mbgc-score ' + className, h('span', 'mbgc-numeral', percent(value)),
+    const available = Number.isFinite(value);
+    return h('div', 'mbgc-score ' + className,
+      h('span', available ? 'mbgc-numeral' : 'mbgc-numeral mbgc-unavailable',
+        available ? percent(value) : 'No grade available'),
       label ? h('span', 'mbgc-letter', label) : null);
   }
 
@@ -175,7 +178,10 @@
         if (task.taskUrl) title.href = task.taskUrl;
         row.append(h('div', 'mbgc-assessment',
           h('div', '', title, h('small', 'mbgc-muted', [task.assessmentType, task.scenario ? 'Hypothetical' : '', task.issue || task.status].filter(Boolean).join(' · '))),
-          h('span', 'mbgc-assessment-score', app.validScore(task) ? `${task.earnedPoints} / ${task.maxPoints}` : 'Ungraded')));
+          h('span', 'mbgc-assessment-score', app.validScore(task) ? `${task.earnedPoints} / ${task.maxPoints}` :
+            task.gradeKind === 'rubric' ? 'Rubric only' :
+              task.gradeKind === 'letter' ? task.displayedLetter + ' (letter only)' :
+                task.issue ? 'Points unavailable' : 'Ungraded')));
       }
       list.append(row);
     }
@@ -401,19 +407,18 @@
     const data = gradeData(sync, view.classId, selectedKey);
     const categories = Object.keys(data.weights).filter((category) => data.weights[category] > 0);
     if (!data.verified || !categories.length) {
-      page.append(empty('This subject needs more information',
+      page.append(empty(data.result.percentage === null ? 'No grade available' : 'This subject needs more information',
         data.verified ? 'Sync category weights in Class Tasks or add them under Overall Grades → Settings.' :
           'Identify the academic term in Class Tasks before modeling this subject.', 'estimator'));
       return page;
     }
-    const exam = categories.find((name) => /(?:semester|final|term)\s+exam/i.test(name)) ||
-      categories.find((name) => /\bexam\b/i.test(name)) || categories[0];
+    const firstCategory = categories[0];
     function defaults() {
-      return { entries: [], overrides: {}, pick: exam, points: 80, max: 100, replaces: '',
+      return { entries: [], overrides: {}, pick: firstCategory, points: 80, max: 100, replaces: '',
         target: 80, targetMode: 'percentage', targetLetter: data.scale.find(([min]) => min <= 80)?.[1] ?? data.scale[0][1] };
     }
     const model = view.scenario ??= defaults();
-    if (!categories.includes(model.pick)) model.pick = exam;
+    if (!categories.includes(model.pick)) model.pick = firstCategory;
     const taskOptions = () => [['', 'Add a new assessment'],
       ...data.tasks.filter((task) => app.validScore(task) && app.key(task.category) === app.key(model.pick) &&
         !model.entries.some((entry) => entry.id !== model.editing && entry.replaces === task.id))

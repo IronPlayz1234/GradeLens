@@ -342,13 +342,13 @@
     return (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)?.closest('.mbgc-owned');
   }
 
-  const gradeRoots = app.selectors.tasks + ',' + app.selectors.score;
+  const gradeRoots = [app.selectors.tasks, app.selectors.score, app.selectors.points, app.selectors.letter, app.selectors.rubric].join(',');
   const chartRoots = 'canvas,svg,[data-chart],.chart-frame,.highcharts-container';
   const relevant = [gradeRoots, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
     app.discoveryLinks, 'a[href*="/core_tasks/"],a[href*="/tasks/"]', 'table,thead,h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4,.title',
     '[data-task-list],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
   const structure = relevant + ',main,[role="main"],#content,[data-all-tasks]';
-  const scoreAttributes = new Set(['data-earned-points', 'data-max-points', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade']);
+  const scoreAttributes = new Set(['data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade']);
 
   function handleMutations(records) {
     if (location.href !== lastURL) { reconcile(); return; }
@@ -366,7 +366,7 @@
         continue;
       }
       const row = target.closest(app.selectors.tasks);
-      if (row && (scoreAttributes.has(entry.attributeName) || (entry.type !== 'attributes' && target.closest(app.selectors.score) &&
+      if (row && (scoreAttributes.has(entry.attributeName) || (entry.type !== 'attributes' && target.closest(app.selectors.score + ',' + app.selectors.points) &&
         children.every((node) => node.nodeType === Node.TEXT_NODE)))) {
         scores.add(row);
         continue;
@@ -386,7 +386,7 @@
   const observer = new MutationObserver(handleMutations);
   observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
     attributeFilter: ['data-selected-term-id', 'data-term-id', 'data-total-count', 'class', 'style', 'hidden', 'aria-hidden',
-      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
+      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   window.addEventListener('popstate', reconcile);
   window.addEventListener('hashchange', reconcile);
