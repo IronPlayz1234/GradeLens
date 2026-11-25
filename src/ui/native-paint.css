@@ -1,0 +1,10 @@
+/* Only the paint pass can opt a native element into these rules. */
+@scope (html[data-mbgc-native-dark]) to (.mbgc-owned,.mbr-ui,.badge,[data-status],[data-category-color],[data-event-color],
+  [data-banner-artwork],.banner-artwork,[role="img"],[data-mbgc-audit-tone],svg,img,picture,video,canvas,iframe) {
+  [data-mbgc-neutral-surface] {
+    background-color: attr(data-mbgc-neutral-surface type(<color>), var(--mbgc-native-surface)) !important;
+  }
+  [data-mbgc-paint-ink] {
+    color: attr(data-mbgc-paint-ink type(<color>), var(--mbgc-native-text)) !important;
+  }
+}

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GradeLens \u2014 for ManageBac",
-  "version": "1.25",
+  "version": "1.26",
   "icons": {
     "16": "assets/icons/gradelens-16.png",
     "32": "assets/icons/gradelens-32.png",
@@ -49,11 +49,13 @@
         "src/ui/tokens.css",
         "src/ui/styles.css",
         "src/ui/native-dark.css",
-        "src/ui/native-components.css"
+        "src/ui/native-components.css",
+        "src/ui/native-paint.css"
       ],
       "js": [
         "src/ui/theme.js",
-        "src/content/appearance.js"
+        "src/content/appearance.js",
+        "src/content/native-surfaces.js"
       ],
       "run_at": "document_start"
     },
@@ -69,7 +71,6 @@
         "src/content/sync.js",
         "src/ui/icons.js",
         "src/ui/views.js",
-        "src/content/native-surfaces.js",
         "src/content/native-components.js",
         "src/content/index.js"
       ],

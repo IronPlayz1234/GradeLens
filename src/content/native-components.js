@@ -28,7 +28,14 @@
 
   function mark(node, attr, value) {
     if (!node || node.closest(owned)) return;
-    if (node.getAttribute(attr) !== value) node.setAttribute(attr, value);
+    if (node.getAttribute(attr) !== value) {
+      // Hand off paint to the newly identified component before it is shown.
+      if (attr === part || attr === surface || attr === selectedLink) {
+        node.removeAttribute('data-mbgc-neutral-surface');
+        node.removeAttribute('data-mbgc-paint-ink');
+      }
+      node.setAttribute(attr, value);
+    }
     tagged.add(node);
   }
 
@@ -83,6 +90,7 @@
   }
 
   function hasPaleFill(node) {
+    if (node.hasAttribute('data-mbgc-neutral-surface')) return true;
     const style = getComputedStyle(node);
     const rgb = style.backgroundColor.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/)?.slice(1).map(Number);
     return Boolean(rgb && Math.min(...rgb) >= 210 && Math.max(...rgb) - Math.min(...rgb) <= 16 &&

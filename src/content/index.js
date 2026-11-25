@@ -405,7 +405,6 @@
       view = freshView();
       force = true;
     }
-    app.bindNativeSurfaces();
     installNav();
     app.bindNativeComponents(nativeAnchor);
     updateNativeIcons(nativeAnchor);

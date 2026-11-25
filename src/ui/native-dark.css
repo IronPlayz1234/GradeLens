@@ -42,7 +42,7 @@ html[data-mbgc-native-dark] :is(
   .details-panel,[data-details-panel],[data-all-tasks],[data-task-list],.task-card,.assignment-card,.assessment-card,.short-assignment,
   .list-group-item,.well,.bg-white,.bg-light,.class-banner-content,.group-banner-content,.class-header-content,.group-header-content,
   [data-class-header-content],[data-group-header-content],.workspace-welcome,.dashboard-shortcut,[data-workspace-shortcut],
-  .activity-feed,.activity-item,.latest-activity,[data-activity-feed],#latest-activity,.tab-content,[data-mbgc-neutral-surface]):where(:not([data-mbgc-audit-part="lesson"],[data-mbgc-audit-part="event"])):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
+  .activity-feed,.activity-item,.latest-activity,[data-activity-feed],#latest-activity,.tab-content):where(:not([data-mbgc-audit-part="lesson"],[data-mbgc-audit-part="event"])):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
   background-color: var(--mbgc-native-surface) !important;
   color: var(--mbgc-native-text) !important;
   border-color: var(--mbgc-native-border) !important;

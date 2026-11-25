@@ -47,6 +47,14 @@ async function notify(account, originTab) {
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   const student = (sender.origin == null || sender.origin === origin) && sender.frameId === 0 &&
     /^https:\/\/uia\.managebac\.com\/student(?:[/?#]|$)/.test(sender.url ?? '');
+  if (student && sender.id === chrome.runtime.id && message?.type === 'mbgc:native-paint-css' && sender.documentId && sender.tab?.id != null) {
+    chrome.scripting.insertCSS({
+      files: ['src/ui/native-paint.css'],
+      target: { tabId: sender.tab.id, documentIds: [sender.documentId] },
+      origin: 'USER'
+    }).then(() => respond(true), () => respond(false));
+    return true;
+  }
   if (sender.id === chrome.runtime.id && message?.type === 'mbgc:preferences' &&
     (student || sender.url === chrome.runtime.getURL('popup.html'))) {
     enqueue(async () => {

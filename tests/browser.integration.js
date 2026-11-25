@@ -1687,3 +1687,109 @@ test('saved appearance is available at document start across navigation and brow
     await fs.rm(folder, { recursive: true, force: true });
   }
 });
+
+test('computed dark mode repairs unfamiliar and dynamically inserted native paint', { timeout: 30000 }, async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-native-paint-'));
+  const browser = await chromium.launchPersistentContext(profile, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root],
+    viewport: { width: 960, height: 690 }
+  });
+  browser.setDefaultTimeout(6000);
+  const html = `<!doctype html><html data-theme="orange"><head><title>Computed paint fixture</title>
+    <style>
+      body { margin: 0; padding: 30px; font: 16px system-ui; }
+      article, #detached { padding: 12px; margin: 12px 0; border-radius: 6px }
+      #detached { position: fixed; top: 30px; right: 30px; }
+      #small { height: 26px; width: 84px; border: 0; border-radius: 4px }
+      .cold-ink { color: rgb(22, 29, 40) !important; }
+      .pending-paint { background: rgb(237, 243, 246); }
+      .pending-dark { background: rgb(9, 13, 18); color: white; }
+      .pressable { background-color: #fff; color: #151e2a; border: 0; padding: 4px 8px; }
+      .pressable:hover { background-color: #132440; color: #f3f4f7; }
+      #banner { background: linear-gradient(90deg, #ffb85c, #ffd19d); color: #251e17; width: 180px }
+    </style></head><body>
+    <main><h1>Computed paint fixture</h1>
+      <article id="unknown" style="background:#fbfcfd"><strong class="cold-ink">Student activity</strong>
+        <button id="small" style="background:white !important; color:#152030 !important">Show more</button>
+        <span class="badge" id="badge" style="background:#79d58c;color:#102816">Present</span>
+        <div id="banner">Artwork</div>
+      </article>
+    </main>
+    </body></html>`;
+  const route = host + '/student/dashboard';
+  const color = (node, property) => node.evaluate((el, prop) => getComputedStyle(el)[prop], property);
+  const background = (node) => color(node, 'backgroundColor');
+  const contrast = (node) => node.evaluate((el) => {
+    const rgb = (value) => value.match(/[\d.]+/g).slice(0, 3).map(Number);
+    const luma = (c) => c.reduce((sum, channel, i) => {
+      const v = channel / 255;
+      return sum + [.2126, .7152, .0722][i] * (v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
+    }, 0);
+    const bg = luma(rgb(getComputedStyle(el).backgroundColor));
+    const fg = luma(rgb(getComputedStyle(el).color));
+    return (Math.max(bg, fg) + .05) / (Math.min(bg, fg) + .05);
+  });
+  try {
+    await browser.route(host + '/**', (entry) => entry.fulfill({ body: html, contentType: 'text/html' }));
+    const worker = browser.serviceWorkers()[0] ?? await browser.waitForEvent('serviceworker');
+    async function mode(appearance) {
+      await worker.evaluate(async (appearance) => {
+        await chrome.storage.local.set({ 'mbgc:preferences': { appearance, refreshMinutes: 0, welcomeSeen: true } });
+        await MBGC.refreshAppearancePrimer?.();
+      }, appearance);
+    }
+    const page = await browser.newPage();
+    await mode('dark');
+    await page.goto(route);
+    const button = page.locator('#small');
+    await button.and(page.locator('[data-mbgc-paint-ink]')).waitFor();
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('#small')).backgroundColor === 'rgb(32, 42, 54)');
+    assert.ok(await contrast(button) >= 4.5);
+    assert.equal(await background(page.locator('#unknown')), 'rgb(29, 35, 44)');
+    assert.notEqual(await color(page.locator('.cold-ink'), 'color'), 'rgb(22, 29, 40)');
+    assert.equal(await background(page.locator('#badge')), 'rgb(121, 213, 140)');
+    assert.equal(await color(page.locator('#banner'), 'color'), 'rgb(37, 30, 23)');
+    assert.ok((await color(page.locator('#banner'), 'backgroundImage')).startsWith('linear-gradient'));
+
+    await page.evaluate(() => {
+      const portal = document.createElement('div');
+      portal.id = 'detached';
+      portal.className = 'pending-paint';
+      portal.innerHTML = '<span class="cold-ink">Detached tools</span> <button class="pressable">Apply</button>';
+      document.body.append(portal);
+    });
+    const portal = page.locator('#detached');
+    await portal.and(page.locator('[data-mbgc-neutral-surface]')).waitFor();
+    const apply = page.getByRole('button', { name: 'Apply' });
+    await apply.and(page.locator('[data-mbgc-paint-ink]')).waitFor();
+    assert.ok(await contrast(apply) >= 4.5);
+    assert.notEqual(await color(portal.locator('.cold-ink'), 'color'), 'rgb(22, 29, 40)');
+    await apply.hover();
+    await apply.and(page.locator(':not([data-mbgc-neutral-surface])')).waitFor();
+    assert.equal(await background(apply), 'rgb(19, 36, 64)');
+    await page.mouse.move(8, 8);
+    await apply.and(page.locator('[data-mbgc-neutral-surface]')).waitFor();
+
+    await portal.evaluate((node) => { node.className = 'pending-dark'; });
+    await portal.and(page.locator('[data-mbgc-neutral-surface]')).waitFor({ state: 'detached' });
+    assert.equal(await background(portal), 'rgb(9, 13, 18)');
+    await portal.evaluate((node) => { node.style.setProperty('background-color', 'white', 'important'); });
+    await portal.and(page.locator('[data-mbgc-neutral-surface]')).waitFor();
+    assert.equal(await background(portal), 'rgb(29, 35, 44)');
+
+    const screenshots = process.env.MBGC_AUDIT_SCREENSHOTS;
+    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'computed-native-dark.png') });
+    await mode('light');
+    await page.locator('html[data-mbgc-native-dark]').waitFor({ state: 'detached' });
+    await button.and(page.locator('[data-mbgc-paint-ink]')).waitFor({ state: 'detached' });
+    assert.equal(await background(button), 'rgb(255, 255, 255)');
+    assert.equal(await color(button, 'color'), 'rgb(21, 32, 48)');
+    assert.equal(await background(portal), 'rgb(255, 255, 255)');
+    await page.locator('.mbgc-nav[data-theme="light"]').first().waitFor();
+    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'computed-native-light.png') });
+  } finally {
+    await browser.close();
+    await fs.rm(profile, { recursive: true, force: true });
+  }
+});
