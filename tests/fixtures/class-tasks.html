@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en" style="--primary-color: #7044c6">
+<head><meta charset="utf-8"><title>Class Tasks</title></head>
+<body>
+<style>
+  body { margin: 0; background: #f7f5fa; color: #282239; font: 15px system-ui; }
+  body[data-theme=dark] { background: #17141e; color: #f1edfa; --primary-color: #ffd28c; }
+  .shell { display: grid; grid-template-columns: 205px minmax(0,1fr); min-height: 100vh; }
+  aside { padding: 20px; border-right: 1px solid #79728255; }
+  aside a { display: block; padding: 9px 0; color: inherit; text-decoration: none; }
+  header { padding: 10px 18px; border-bottom: 1px solid #79728255; }
+  [data-all-tasks], #latest-activity { margin: 18px; padding: 12px; border: 1px solid #79728255; border-radius: 10px; }
+  @media (max-width: 630px) { .shell { display: block; } aside { padding: 5px 12px; } aside ul { margin: 0; } }
+</style>
+<header><a href="/student/profile/9">Manage Your Profile</a></header>
+<div class="shell">
+<aside class="sidebar"><nav><strong>My Workspace</strong><ul>
+<li><a href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a></li>
+</ul><a href="/student/classes/123">Mathematics Higher Level, Statistics and Mathematical Investigation</a>
+<a href="/student/classes/456">Physics</a></nav></aside>
+<main>
+<h1 class="class-title">Mathematics Higher Level, Statistics and Mathematical Investigation</h1>
+<a href="/student/classes/123">Overview</a> · <a href="/student/classes/123/core_tasks">Tasks</a> · <a href="/student/classes/123/files">Files</a>
+<section data-all-tasks>
+<div class="section-header"><h2>All Tasks</h2></div>
+<label>School term <select name="term_id"><option value="71" selected>2026–27 · Semester 1</option><option value="72">2026–27 · Semester 2</option></select></label>
+<button id="chart-toggle">Switch chart</button>
+<div id="native-chart"><h3>Overall Task Completion</h3><canvas aria-label="Native chart"></canvas></div>
+<div data-task-list="all" data-term-id="71" data-total-count="4">
+  <div class="short-assignment section f-tile" id="task-one">
+    <div class="h4 title"><a href="/student/classes/123/core_tasks/1">Networks short answer</a></div>
+    <div class="labels-set"><div class="label">Summative</div><div class="label">Coursework</div></div>
+    <div class="assessment task-score assessment-cell"><span class="submission-status">Pending</span><span class="grade">A</span><div class="points">8 / 10 pts</div></div>
+  </div>
+  <div class="short-assignment section f-tile"><div class="h4 title"><a href="/student/classes/123/core_tasks/2">Proofs portfolio</a></div>
+    <div class="labels-set"><div class="label">Formative</div><div class="label">Coursework</div></div>
+    <div class="assessment-cell"><div class="points">15 / 30 pts</div></div></div>
+  <div class="short-assignment section f-tile"><div class="h4 title"><a href="/student/classes/123/core_tasks/3">Statistics investigation</a></div>
+    <div class="labels-set"><div class="label">Summative</div><div class="label">Research</div></div>
+    <div class="assessment-cell"><div class="points">18 / 20 pts</div></div></div>
+  <div class="short-assignment section f-tile"><div class="h4 title"><a href="/student/classes/123/core_tasks/4">Semester paper</a></div>
+    <div class="labels-set"><div class="label">Summative</div><div class="label">Semester Exam</div></div>
+    <div class="assessment-cell"><div class="points">70 / 100 pts</div></div></div>
+</div>
+</section>
+<div id="categories-table">
+<div class="list-item list-item-head"><div class="cell">Category</div><div class="cell">Weight</div></div>
+<div class="list-item"><div class="cell"><div class="label">Coursework</div></div><div class="cell">30</div></div>
+<div class="list-item"><div class="cell"><div class="label">Research</div></div><div class="cell">30%</div></div>
+<div class="list-item"><div class="cell"><div class="label">Semester Exam</div></div><div class="cell">40</div></div>
+</div>
+</main>
+</div>
+</body>
+</html>

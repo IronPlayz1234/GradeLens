@@ -1,0 +1,6 @@
+{
+  "name": "managebac-grade-calculator",
+  "private": true,
+  "scripts": { "test": "node --test tests/*.test.js", "test:browser": "node --test tests/browser.integration.js" },
+  "devDependencies": { "linkedom": "0.18.12", "playwright": "1.58.2" }
+}
