@@ -1252,3 +1252,145 @@ test('v1.22 shared appearance, exact accents and single clipped navigation treat
     await fs.rm(profile, { recursive: true, force: true });
   }
 });
+
+test('v1.23 pairs native surfaces with legible text and aligns the six workspace links', { timeout: 40000 }, async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-native-surface-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root], viewport: { width: 1160, height: 800 }
+  });
+  context.setDefaultTimeout(7000);
+  const directory = process.env.MBGC_V123_SCREENSHOTS;
+  const base = await fixture('native-appearance');
+  const taskHTML = await fixture('class-tasks');
+  const classPath = '/student/classes/123';
+  const groupPath = '/student/groups/22';
+  const workspace = '/student/dashboard';
+  const calendar = '/student/calendar';
+  const timetable = '/student/timetables';
+  const deadlines = '/student/tasks_and_deadlines';
+  const personal = '/student/settings/personalisation';
+  const banner = (noun) => `<header class="${noun.toLowerCase()}-banner-content" style="background:#fff">
+      <div class="banner-artwork" style="height:48px;background-image:linear-gradient(120deg,#37608b,#26466a)"></div>
+      <h1 style="color:#111">${noun === 'Class' ? 'Mathematics' : 'Student council'}</h1>
+    </header>
+    <nav aria-label="Record sections" role="tablist" class="nav-tabs">
+      <a role="tab" aria-selected="true" href="#overview">Overview</a> <a role="tab" href="#members">Members</a>
+    </nav>
+    <section class="mystery-activity-container" style="background:#f8f8f9;padding:16px;margin-top:14px">
+      <h2 style="color:#243142">Latest Activity</h2>
+      <p style="color:#222">A new update is available.</p>
+      <span class="badge" style="color:#fff;background:#3655b0">Published</span>
+    </section>`;
+  const pages = {
+    [classPath]: banner('Class'), [groupPath]: banner('Group'),
+    [workspace]: '<h1>My Workspace</h1><section class="workspace-welcome" style="background:#eee;padding:16px"><h2 style="color:#243142">Welcome back</h2><p>Upcoming classes and student tools.</p></section><div class="columns"><a class="dashboard-shortcut" style="background:#fff;padding:18px" href="/student/calendar">Calendar</a><a class="quick-launch" style="background:#fff;padding:18px" href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a></div>',
+    [calendar]: '<h1>Calendar</h1><section class="card"><div class="card-body"><table class="fc"><thead><tr><th class="fc-col-header-cell">Monday</th></tr></thead><tbody><tr><td class="fc-daygrid-day fc-day-today">Physics</td></tr></tbody></table></div></section>',
+    [timetable]: '<h1>Timetables</h1><section class="timetable panel"><table class="table"><thead><tr><th>Time</th><th>Class</th></tr></thead><tbody><tr><td>9:00</td><td>Physics</td></tr></tbody></table></section>',
+    [deadlines]: '<h1>Tasks &amp; Deadlines</h1><div class="panel"><div class="panel-body" style="background:#fff"><label>Search <input class="form-control" type="search"></label><table class="table"><tbody><tr><td>Assignment</td></tr></tbody></table><p class="text-danger">Submission pending</p></div></div>',
+    [personal]: '<h1>Personalisation</h1><section class="panel"><div class="panel-body"><label>Name <input class="form-control" type="text" value="Student"></label><button class="btn-primary">Save</button></div></section><div class="dropdown-menu" style="padding:10px"><a class="dropdown-item" href="#settings">Preferences menu</a></div><div class="modal-content" role="dialog" style="padding:10px;margin-top:8px"><h2>Preferences dialog</h2><p>Review settings.</p></div>'
+  };
+  const capture = async (page, name) => {
+    if (directory) await page.screenshot({ path: path.join(directory, name + '.png'), animations: 'disabled', fullPage: true });
+  };
+  const contrast = async (locator) => locator.evaluate((node) => {
+    const parse = (text) => text.match(/[\d.]+/g).map(Number);
+    const light = (value) => parse(value).slice(0, 3).reduce((sum, c, index) => {
+      const unit = c / 255;
+      return sum + [.2126, .7152, .0722][index] * (unit <= .04045 ? unit / 12.92 : ((unit + .055) / 1.055) ** 2.4);
+    }, 0);
+    const fg = light(getComputedStyle(node).color);
+    for (let parent = node; parent; parent = parent.parentElement ?? parent.getRootNode()?.host) {
+      const bg = getComputedStyle(parent).backgroundColor;
+      if ((parse(bg)[3] ?? 1) < .95) continue;
+      const l = light(bg);
+      return (Math.max(fg, l) + .05) / (Math.min(fg, l) + .05);
+    }
+    return 0;
+  });
+  try {
+    await context.route(host + '/**', (intercept) => {
+      const route = new URL(intercept.request().url()).pathname;
+      const subjectTasks = route === physicsPath ? taskHTML.replaceAll('/classes/123', '/classes/456') : taskHTML;
+      const html = pages[route] ? base.replace('>Dashboard</a>', '>My Workspace</a>').replace('__CONTENT__', pages[route])
+        .replace('class="nav-item" href="' + route, 'class="nav-item active" aria-current="page" href="' + route) : subjectTasks;
+      return intercept.fulfill({ body: html, contentType: 'text/html' });
+    });
+    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+    await worker.evaluate(() => chrome.storage.local.set({ 'mbgc:preferences': { appearance: 'dark', refreshMinutes: 0, welcomeSeen: true } }));
+    const page = await context.newPage();
+    for (const [route, name] of [
+      [workspace, '01-my-workspace'], [calendar, '02-calendar'], [timetable, '03-timetables'], [deadlines, '04-deadlines'],
+      [classPath, '05-class-overview'], [tasksPath, '06-class-tasks'], [groupPath, '07-groups'], [personal, '08-personalisation']
+    ]) {
+      await page.goto(host + route);
+      await page.locator('html[data-mbgc-native-dark]').waitFor();
+      await page.locator('.mbgc-nav').first().waitFor();
+      let sample = 'main h1';
+      if ([groupPath, classPath].includes(route)) {
+        await page.locator('.mystery-activity-container[data-mbgc-neutral-surface]').waitFor();
+        assert.ok(await contrast(page.getByText('Latest Activity', { exact: true })) >= 4.5);
+        assert.ok(await contrast(page.getByRole('tab', { name: 'Overview' })) >= 4.5);
+        assert.equal(await page.locator('.banner-artwork').evaluate((node) => getComputedStyle(node).backgroundImage.startsWith('linear-gradient')), true);
+        assert.equal(await page.locator('.badge').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(54, 85, 176)');
+      }
+      if (route === workspace) {
+        await page.locator('.quick-launch[data-mbgc-neutral-surface]').waitFor();
+        sample = '.workspace-welcome h2';
+      }
+      assert.ok(await contrast(page.locator(sample).first()) >= 4.5, name);
+      for (const target of await page.locator('main td,main th,main label,main .btn-primary,main .dropdown-item,main [role="dialog"] p').all()) {
+        assert.ok(await contrast(target) >= 4.5, name + ' ' + await target.textContent());
+      }
+      const selected = page.locator('[data-mbgc-nav-native]');
+      if ([workspace, calendar, timetable, deadlines].includes(route)) {
+        assert.equal(await selected.evaluate((node) => getComputedStyle(node).fontWeight), '700');
+        const metrics = await page.locator('a[data-mbgc-nav-row]').evaluateAll((links) => links.map((link) => {
+          const icon = link.querySelector('svg,i,img');
+          const label = link.querySelector('.mbgc-nav-label');
+          return [link.offsetHeight, icon.getBoundingClientRect().x, icon.getBoundingClientRect().width, label.getBoundingClientRect().x];
+        }));
+        assert.equal(metrics.length, 6);
+        assert.ok(metrics.every((row) => JSON.stringify(row) === JSON.stringify(metrics[0])));
+      }
+      await capture(page, name);
+    }
+    await page.goto(host + tasksPath);
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    await page.locator('.mbgc-subject-grade .mbgc-numeral', { hasText: '%' }).first().waitFor();
+    assert.ok(await contrast(page.getByRole('heading', { name: 'Overall Grades' })) >= 4.5);
+    assert.equal(await page.locator('.mbgc-nav[aria-current="page"]').evaluate((node) => getComputedStyle(node).fontWeight), '700');
+    await capture(page, '09-overall-grades');
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    await page.locator('.mbgc-prediction-comparison').waitFor();
+    assert.equal(await page.locator('.mbgc-nav[aria-current="page"]').evaluate((node) => getComputedStyle(node).fontWeight), '700');
+    await capture(page, '10-grade-estimator');
+    const popup = await context.newPage();
+    await popup.setViewportSize({ width: 400, height: 560 });
+    await popup.goto(worker.url().split('/src/')[0] + '/popup.html');
+    await popup.locator('html[data-theme="dark"]').waitFor();
+    assert.ok(await contrast(popup.getByRole('heading', { name: 'GradeLens' })) >= 4.5);
+    await capture(popup, '11-toolbar-popup');
+    await page.goto(host + groupPath);
+    await page.locator('.mystery-activity-container[data-mbgc-neutral-surface]').waitFor();
+    await page.evaluate(() => {
+      const panel = document.createElement('section');
+      panel.className = 'new-neutral-panel';
+      panel.style = 'background:rgb(249,249,250);height:65px';
+      document.querySelector('main').append(panel);
+    });
+    await page.locator('.new-neutral-panel[data-mbgc-neutral-surface]').waitFor();
+    await popup.getByText('Appearance', { exact: true }).click();
+    await popup.getByLabel('Color mode').selectOption('light');
+    await page.locator('html[data-mbgc-native-dark]').waitFor({ state: 'detached' });
+    await page.locator('.new-neutral-panel[data-mbgc-neutral-surface]').waitFor({ state: 'detached' });
+    assert.equal(await page.locator('.new-neutral-panel').evaluate((node) => getComputedStyle(node).backgroundColor),
+      'rgb(249, 249, 250)');
+    await page.locator('.mbgc-nav[data-theme="light"]').first().waitFor();
+    assert.ok(await contrast(page.getByText('Latest Activity', { exact: true })) >= 4.5);
+    await capture(page, '12-groups-light-restored');
+  } finally {
+    await context.close();
+    await fs.rm(profile, { recursive: true, force: true });
+  }
+});

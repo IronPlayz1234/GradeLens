@@ -18,9 +18,38 @@ html[data-mbgc-native-dark] {
   --mbgc-native-link: var(--mbgc-native-ink, #a8cdfb);
   background: var(--mbgc-native-bg);
 }
-html[data-mbgc-native-dark] :is(body,main,[role="main"],#content,#main-content,.main-content,.content-wrapper,.page-content,.dashboard,.dashboard-content,.workspace-content) {
+/* Paint foreground and background together at each surface boundary. */
+html[data-mbgc-native-dark] :where(body,main,[role="main"],#content,#main-content,.main-content,.content-wrapper,
+  .page-content,.dashboard,.dashboard-content,.workspace-content,.workspace-dashboard,.class-content,.group-content):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
   background-color: var(--mbgc-native-bg) !important;
   color: var(--mbgc-native-text) !important;
+  border-color: var(--mbgc-native-border) !important;
+}
+html[data-mbgc-native-dark] :is(body > header,.sidebar,[data-sidebar],.navbar,.topbar,.top-nav,.subnav,.navigation-wrapper):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
+  background-color: var(--mbgc-native-nav) !important;
+  color: var(--mbgc-native-text) !important;
+  border-color: var(--mbgc-native-border) !important;
+}
+html[data-mbgc-native-dark] :is(
+  .card,.card-body,.panel,.panel-body,.widget,.widget-body,.dashboard-widget,.dashboard-card,.class-panel,.content-panel,
+  .details-panel,[data-details-panel],[data-all-tasks],[data-task-list],.task-card,.assignment-card,.assessment-card,.short-assignment,
+  .list-group-item,.well,.bg-white,.bg-light,.class-banner-content,.group-banner-content,.class-header-content,.group-header-content,
+  [data-class-header-content],[data-group-header-content],.workspace-welcome,.dashboard-shortcut,[data-workspace-shortcut],
+  .activity-feed,.activity-item,.latest-activity,[data-activity-feed],#latest-activity,.tab-content,[data-mbgc-neutral-surface]):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
+  background-color: var(--mbgc-native-surface) !important;
+  color: var(--mbgc-native-text) !important;
+  border-color: var(--mbgc-native-border) !important;
+}
+html[data-mbgc-native-dark] :is(
+  .card-header,.card-footer,.panel-heading,.widget-header,.section-header,.modal-header,.modal-footer,.nav-tabs,[role="tablist"]):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
+  background-color: var(--mbgc-native-secondary) !important;
+  color: var(--mbgc-native-text) !important;
+  border-color: var(--mbgc-native-border) !important;
+}
+html[data-mbgc-native-dark] :is(.modal-content,[role="dialog"],.dropdown-menu,.popover,.tooltip-inner,.ui-datepicker,.fc-popover):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
+  background-color: var(--mbgc-native-elevated) !important;
+  color: var(--mbgc-native-text) !important;
+  border-color: var(--mbgc-native-border) !important;
 }
 html[data-mbgc-native-dark] body {
   --bs-body-bg: var(--mbgc-native-bg);
@@ -30,37 +59,28 @@ html[data-mbgc-native-dark] body {
   --bs-secondary-bg: var(--mbgc-native-secondary);
   --bs-tertiary-bg: var(--mbgc-native-surface);
 }
-html[data-mbgc-native-dark] :is(body > header,.sidebar,[data-sidebar],.navbar,.topbar,.top-nav,.subnav,.navigation-wrapper):not(.mbgc-owned,.mbgc-owned *) {
-  background-color: var(--mbgc-native-nav) !important;
-  color: var(--mbgc-native-text);
-  border-color: var(--mbgc-native-border) !important;
-}
-html[data-mbgc-native-dark] :is(.card,.card-body,.panel,.panel-body,.widget,.widget-body,.dashboard-widget,.dashboard-card,
-  .class-panel,.content-panel,.details-panel,[data-details-panel],[data-all-tasks],[data-task-list],.task-card,.assignment-card,
-  .assessment-card,.short-assignment,.list-group-item,.well,.bg-white,.bg-light):not(.mbgc-owned,.mbgc-owned *,[data-category-color]) {
-  background-color: var(--mbgc-native-surface) !important;
-  color: var(--mbgc-native-text) !important;
-  border-color: var(--mbgc-native-border) !important;
-}
-html[data-mbgc-native-dark] :is(.card-header,.card-footer,.panel-heading,.widget-header,.section-header,.modal-header,.modal-footer):not(.mbgc-owned,.mbgc-owned *) {
-  background-color: var(--mbgc-native-secondary) !important;
-  color: var(--mbgc-native-text) !important;
-  border-color: var(--mbgc-native-border) !important;
-}
-html[data-mbgc-native-dark] :is(.modal-content,[role="dialog"],.dropdown-menu,.popover,.tooltip-inner,.ui-datepicker,.fc-popover):not(.mbgc-owned,.mbgc-owned *) {
-  background-color: var(--mbgc-native-elevated) !important;
-  color: var(--mbgc-native-text) !important;
-  border-color: var(--mbgc-native-border) !important;
-}
 html[data-mbgc-native-dark] :is(.dropdown-item,.dropdown-menu > li > a,[role="menuitem"]):not(.mbgc-owned,.mbgc-owned *,[data-mbgc-nav-native]) {
   color: var(--mbgc-native-text) !important;
 }
 html[data-mbgc-native-dark] :is(.dropdown-item,.dropdown-menu > li > a,[role="menuitem"]):hover:not(.mbgc-owned,.mbgc-owned *,[data-mbgc-nav-native]) {
   background-color: var(--mbgc-native-hover) !important;
 }
-html[data-mbgc-native-dark] :is(h1,h2,h3,h4,h5,h6,legend,label,.text-dark,.text-body,.panel-title,.card-title):not(.mbgc-owned,.mbgc-owned *,
-  .alert *,.badge *,.fc-event *,.btn-primary *,.text-danger,.text-success,.text-warning,.text-info) {
+/* Explicitly light or dark native typography follows the contrast of the managed surface. */
+html[data-mbgc-native-dark] :is(main,[role="main"],#content,#main-content,.main-content,.modal-content,[role="dialog"])
+  :is(h1,h2,h3,h4,h5,h6,p,legend,label,.text-dark,.text-body,.panel-title,.card-title,.activity-title,.activity-description,
+    .class-title,.group-title,[data-class-title],[data-group-title]):where(:not(.mbgc-owned,.mbgc-owned *,.alert *,.badge,.badge *,.fc-event *,
+      .btn-primary *,.text-danger,.text-success,.text-warning,.text-info,.text-muted,.text-secondary,
+      [data-category-color],[data-category-color] *,[data-banner-artwork] *, .banner-artwork *)) {
   color: var(--mbgc-native-text) !important;
+}
+html[data-mbgc-native-dark] :is(.nav-tabs,[role="tablist"]) :is(.nav-link,[role="tab"],a[href]):where(:not(.mbgc-owned,.mbgc-owned *)) {
+  background-color: transparent !important;
+  color: var(--mbgc-native-muted) !important;
+  border-color: transparent !important;
+}
+html[data-mbgc-native-dark] :is(.nav-tabs,[role="tablist"]) :is(.active,[aria-selected="true"],[aria-current="page"]):where(:not(.mbgc-owned,.mbgc-owned *)) {
+  background-color: var(--mbgc-native-selection, var(--mbgc-native-hover)) !important;
+  color: var(--mbgc-native-link) !important;
 }
 html[data-mbgc-native-dark] :is(.text-muted,.text-secondary,.help-block,.form-text):not(.mbgc-owned,.mbgc-owned *) {
   color: var(--mbgc-native-muted) !important;

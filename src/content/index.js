@@ -30,6 +30,7 @@
   let navKey;
   let activeNativeMenu;
   let selectedNativeLink;
+  let nativeRows = new Set();
   let appearancePanel;
   let wasEnabled;
   let openSettings = false;
@@ -125,8 +126,9 @@
   }
 
   function navLink(text, hash, glyph) {
-    const link = app.h('a', 'mbgc-owned mbgc-nav', app.icon(glyph), text);
+    const link = app.h('a', 'mbgc-owned mbgc-nav', app.icon(glyph), app.h('span', 'mbgc-nav-label', text));
     link.href = hash;
+    link.setAttribute('data-mbgc-nav-row', '');
     link.addEventListener('click', (event) => {
       if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
@@ -135,22 +137,42 @@
     return link;
   }
 
+  function releaseNavRow(link) {
+    link.removeAttribute('data-mbgc-nav-row');
+    for (const label of link.querySelectorAll(':scope > [data-mbgc-nav-text]')) label.replaceWith(...label.childNodes);
+  }
+
   function updateNativeIcons(anchor) {
     const scope = anchor?.closest('aside,.sidebar,nav,[role="navigation"]');
-    if (!scope) return;
-    for (const link of scope.querySelectorAll('a[href]:not(.mbgc-nav)')) {
+    const current = new Set();
+    for (const link of scope?.querySelectorAll('a[href]:not(.mbgc-nav)') ?? []) {
+      const label = app.clean(link.getAttribute('aria-label') || app.clean(link.textContent) || link.title);
+      const glyph = /^my workspace$/i.test(label) ? 'workspace' : /^calendar$/i.test(label) ? 'calendar' :
+        /^timetables?$/i.test(label) ? 'timetable' : /^tasks\s*(?:&|and)\s*deadlines$/i.test(label) ? 'tasks' : null;
+      if (!glyph && link !== anchor) continue;
+      current.add(link);
+      if (!link.hasAttribute('data-mbgc-nav-row')) link.setAttribute('data-mbgc-nav-row', '');
+      for (const node of [...link.childNodes]) {
+        if (node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()) continue;
+        const label = app.h('span', 'mbgc-nav-label');
+        label.setAttribute('data-mbgc-nav-text', '');
+        node.before(label);
+        label.append(node);
+      }
       const added = link.querySelector(':scope > .mbgc-native-glyph');
       const native = link.querySelector('svg:not(.mbgc-native-glyph),img,i,[data-icon],[class*="icon"]:not(.mbgc-native-glyph)');
       if (native) { added?.remove(); continue; }
       if (added) continue;
-      const label = app.clean(link.getAttribute('aria-label') || app.clean(link.textContent) || link.title);
-      const glyph = /^my workspace$/i.test(label) ? 'workspace' : /^calendar$/i.test(label) ? 'calendar' :
-        /^timetables?$/i.test(label) ? 'timetable' : /^tasks\s*(?:&|and)\s*deadlines$/i.test(label) ? 'tasks' : null;
-      if (!glyph) continue;
-      const image = app.icon(glyph);
+      const image = app.icon(glyph ?? 'tasks');
       image.classList.add('mbgc-owned', 'mbgc-native-glyph');
       link.prepend(image);
     }
+    for (const link of nativeRows) {
+      if (current.has(link)) continue;
+      releaseNavRow(link);
+      link.querySelector(':scope > .mbgc-native-glyph')?.remove();
+    }
+    nativeRows = current;
   }
 
   function removeNav() {
@@ -162,6 +184,8 @@
     selectedNativeLink = null;
     nav = [];
     navKey = undefined;
+    for (const link of nativeRows) releaseNavRow(link);
+    nativeRows.clear();
   }
 
   function installNav() {
@@ -380,6 +404,7 @@
       view = freshView();
       force = true;
     }
+    app.bindNativeSurfaces();
     installNav();
     updateNativeIcons(nativeAnchor);
     for (const root of [stage, card]) {
@@ -530,7 +555,7 @@
     render();
   }
   function owns(node) {
-    return (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)?.closest('.mbgc-owned');
+    return (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)?.closest('.mbgc-owned,[data-mbgc-nav-text]');
   }
 
   const gradeRoots = [app.selectors.tasks, app.selectors.score, app.selectors.points, app.selectors.letter, app.selectors.rubric].join(',');

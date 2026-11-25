@@ -430,10 +430,14 @@ a > .mbgc-sidebar-grade {
   border-radius: 6px !important;
   box-shadow: none !important;
   background-clip: border-box !important;
+  font-weight: 700 !important;
 }
 .mbgc-nav[data-theme="light"][aria-current="page"] > svg.mbgc-glyph,
 html:not([data-mbgc-native-dark]) [data-mbgc-nav-native] > svg.mbgc-native-glyph { color: var(--mbgc-native-accent); }
-[data-mbgc-view-active] :is(a.active,a.selected,a[aria-current="page"]):not(.mbgc-owned,[data-mbgc-nav-native]) { color: inherit !important; }
+[data-mbgc-view-active] :is(a.active,a.selected,a[aria-current="page"],li.active > a,li.selected > a):not(.mbgc-owned,[data-mbgc-nav-native]) {
+  color: inherit !important;
+  font-weight: 400 !important;
+}
 [data-mbgc-view-active] :is(a[href],button) > :is(svg,i) { flex-shrink: 0; }
 
 /* Native ManageBac rules sometimes fill all SVG descendants. Force the outline contract only on our glyphs. */
@@ -441,7 +445,29 @@ a:is(.mbgc-nav, :has(> .mbgc-native-glyph)) > svg.mbgc-glyph {
   display: inline-block !important; width: 18px !important; height: 18px !important;
   min-width: 18px; flex: 0 0 18px; vertical-align: -.22em; color: inherit;
 }
-a > svg.mbgc-native-glyph { margin-inline-end: 7px; }
+/* Native and injected workspace links share one row box and icon column. */
+html a[data-mbgc-nav-row] {
+  display: flex !important; align-items: center !important; gap: 9px !important;
+  min-block-size: 38px !important; box-sizing: border-box; min-inline-size: 0;
+  padding: 6px 9px !important; border: 0 solid transparent !important;
+  border-inline-start: 2px solid transparent !important; border-radius: 6px !important;
+  line-height: 1.25; white-space: nowrap;
+}
+html a[data-mbgc-nav-row]:is(.mbgc-nav[aria-current="page"],[data-mbgc-nav-native]) {
+  border-inline-start-color: var(--mbgc-accent, var(--mbgc-native-accent)) !important;
+}
+html a[data-mbgc-nav-row] > :is(svg,img,i,[data-icon],.icon,.nav-icon) {
+  inline-size: 18px !important; block-size: 18px !important; min-inline-size: 18px;
+  flex: 0 0 18px; margin: 0 !important; object-fit: contain;
+}
+html a[data-mbgc-nav-row]:is(.mbgc-nav[aria-current="page"],[data-mbgc-nav-native]) > :where(span,strong,.nav-label,.menu-label) {
+  font-weight: inherit !important;
+}
+.mbgc-nav-label, a[data-mbgc-nav-row] > :is(.nav-label,.menu-label) {
+  min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+li:has(> a[data-mbgc-nav-row]) { list-style: none; }
+:is(ul,ol):has(> li > a[data-mbgc-nav-row]) { padding-inline-start: 0; }
 a > svg.mbgc-glyph, a > svg.mbgc-glyph > :is(path,rect,circle,line) {
   fill: none !important; stroke: currentColor !important; stroke-width: 1.8 !important;
   stroke-linecap: round !important; stroke-linejoin: round !important;
