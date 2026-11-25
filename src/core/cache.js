@@ -1,6 +1,8 @@
 (() => {
   const app = globalThis.MBGC;
-  const settingsDefaults = { method: 'percentage', refreshMinutes: 5 };
+  const settingsDefaults = {
+    method: 'percentage', refreshMinutes: 5, density: 'comfortable', progressBars: true, motion: 'full', welcomeSeen: false
+  };
   const freshCache = () => ({ classes: {}, sources: [], sourceChecks: {}, lastSync: null, revision: 0, clearedAt: 0 });
   const currentTerms = 'current';
   const termKey = (id) => id ? 'term:' + id : 'unknown';
@@ -101,6 +103,8 @@
       if (!classList && !prior && bucket.complete) bucket.complete = false;
       if (classList || detail || !bucket.lastScan) observed.read = true;
       bucket.records[task.id] = { ...task, category: task.category || prior?.category || '',
+        taskUrl: task.taskUrl ?? prior?.taskUrl ?? null, due: task.due ?? prior?.due,
+        possiblePoints: task.possiblePoints ?? prior?.possiblePoints, completed: task.completed ?? prior?.completed,
         observedAt: at, classList: classList || detail, fromDetail: Boolean(detail), source };
     }
     for (const [bucket, observed] of visited) {
@@ -156,5 +160,38 @@
     }
   }
 
-  Object.assign(app, { settingsDefaults, freshCache, mergeScan, mergeCheck, currentTerms, classTermKey });
+  function deadline(due) {
+    if (typeof due === 'number') return due;
+    if (typeof due !== 'string') return NaN;
+    // A date-only deadline is upcoming until the next local calendar day.
+    const day = new Date(due + 'T00:00:00');
+    return day.setDate(day.getDate() + 1);
+  }
+
+  function upcomingTasks(cache, selection, now = Date.now()) {
+    const upcoming = [];
+    for (const [classId, subject] of Object.entries(cache.classes)) {
+      const key = selection === currentTerms ? classTermKey(subject) : selection;
+      const records = subject.terms[key]?.records ?? {};
+      const elsewhere = new Set(Object.entries(subject.terms).filter(([term]) => term !== key && term !== 'unknown')
+        .flatMap(([, bucket]) => Object.keys(bucket.records)));
+      const unknown = selection === currentTerms && key !== 'unknown' ? subject.terms.unknown?.records ?? {} : {};
+      for (const id of new Set([...Object.keys(records), ...Object.keys(unknown)])) {
+        const known = records[id];
+        const extra = unknown[id];
+        if ((!known && elsewhere.has(id)) || [known, extra].some((task) =>
+          task && (task.completed || app.validScore(task) || task.gradeKind === 'letter'))) continue;
+        const task = known ?? extra;
+        const due = known?.due ?? extra?.due;
+        const expiresAt = deadline(due);
+        if (!(expiresAt > now)) continue;
+        upcoming.push({ ...task, classId, due, expiresAt, termKey: key, subject: subject.name || task.subject || 'Class ' + classId,
+          category: known?.category || extra?.category, possiblePoints: known?.possiblePoints ?? extra?.possiblePoints,
+          taskUrl: known?.taskUrl ?? extra?.taskUrl });
+      }
+    }
+    return upcoming.sort((a, b) => a.expiresAt - b.expiresAt || a.title.localeCompare(b.title));
+  }
+
+  Object.assign(app, { settingsDefaults, freshCache, mergeScan, mergeCheck, currentTerms, classTermKey, upcomingTasks });
 })();

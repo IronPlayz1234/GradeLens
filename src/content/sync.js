@@ -133,7 +133,9 @@
     }
 
     async init() {
-      this.settings = { ...app.settingsDefaults, ...(await chrome.storage.local.get(prefsKey))[prefsKey] };
+      const stored = (await chrome.storage.local.get(prefsKey))[prefsKey];
+      this.settings = { ...app.settingsDefaults, ...stored };
+      if (stored && !Object.hasOwn(stored, 'welcomeSeen')) await this.setSettings({ welcomeSeen: true });
     }
 
     async identify(next) {
@@ -284,6 +286,7 @@
     }
 
     async setSettings(patch) {
+      if (Object.entries(patch).every(([key, value]) => this.settings[key] === value)) return;
       this.settings = { ...this.settings, ...patch };
       await chrome.storage.local.set({ [prefsKey]: this.settings });
       this.update();

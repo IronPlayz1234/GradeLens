@@ -207,7 +207,7 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     const page = await context.newPage();
     await page.goto(host + tasksPath);
     await page.getByRole('link', { name: 'Overall Grades' }).click();
-    await page.getByRole('heading', { name: 'Overall Grades' }).waitFor();
+    await page.getByRole('heading', { name: 'Overall Grades', exact: true }).waitFor();
     const widths = await page.locator('.mbgc-header').evaluate((node) => ({
       header: Math.round(node.getBoundingClientRect().width),
       viewport: innerWidth,
@@ -760,5 +760,132 @@ test('cold sync shows real milestones and Retry while warm sync retains grades a
     resumeWarm();
     await browser.close();
     await fs.rm(userData, { recursive: true, force: true });
+  }
+});
+
+test('assessment search, upcoming predictions, appearance and welcome work together', { timeout: 38000 }, async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-expansion-'));
+  let context;
+  let reads = 0;
+  const due = new Date(Date.now() + 3 * 86400000).toISOString();
+  const taskHtml = (await fixture('class-tasks'))
+    .replace('<div data-task-list="all" data-term-id="71" data-total-count="4">', `<div data-task-list="all" data-term-id="71" data-total-count="4">
+      <article class="task-card" data-due-at="${due}" data-possible-points="50" data-category="Coursework">
+        <a href="${tasksPath}/501">Quadratics test</a></article>
+      <article class="task-card" data-task-id="502" data-due-at="${due}">
+        <span class="task-title">Research checkpoint</span></article>`);
+  async function openBrowser() {
+    const opened = await chromium.launchPersistentContext(profile, {
+      ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+      args: ['--disable-extensions-except=' + root, '--load-extension=' + root], viewport: { width: 1180, height: 880 }
+    });
+    opened.setDefaultTimeout(8000);
+    await opened.route(host + '/**', (intercepted) => {
+      const request = intercepted.request();
+      if (!request.isNavigationRequest()) reads++;
+      const body = new URL(request.url()).pathname === tasksPath ? taskHtml :
+        '<header><a href="/student/profile/9">Manage Your Profile</a></header><main>Workspace</main>';
+      return intercepted.fulfill({ contentType: 'text/html', body });
+    });
+    return opened;
+  }
+
+  try {
+    context = await openBrowser();
+    let tab = await context.newPage();
+    await tab.goto(host + tasksPath);
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    const welcome = 'Welcome to your grades! 🎓';
+    await tab.getByRole('region', { name: welcome }).waitFor();
+    await tab.getByRole('button', { name: 'Skip guide' }).focus();
+    await tab.keyboard.press('Escape');
+    await tab.getByRole('region', { name: welcome }).waitFor({ state: 'detached' });
+    await tab.getByRole('button', { name: 'Refresh now' }).waitFor();
+
+    const subject = tab.locator('.mbgc-subject').filter({ hasText: '74.50%' });
+    await subject.locator('summary').click();
+    const search = subject.getByRole('searchbox');
+    await search.fill('   QUADrAtics    test ');
+    await subject.getByText('1 matching assessment.').waitFor();
+    assert.equal(await subject.locator('.mbgc-assessment:visible').count(), 1);
+    assert.equal(await subject.locator('.mbgc-subject-grade .mbgc-numeral').textContent(), '74.50%');
+    await search.fill('courseWORK');
+    await subject.getByText('3 matching assessments.').waitFor();
+    await subject.getByText('65.00%', { exact: true }).waitFor();
+    await search.fill('not visible in ManageBac');
+    await subject.getByText(/No matches among the assessments shown/).waitFor();
+    await subject.getByText(/could not confirm that the task list includes every assessment/).waitFor();
+    await subject.getByRole('button', { name: 'Clear search' }).click();
+    assert.equal(await search.inputValue(), '');
+    const linked = subject.getByRole('link', { name: 'Quadratics test (opens in a new tab)' });
+    await linked.focus();
+    const popup = context.waitForEvent('page');
+    await tab.keyboard.press('Enter');
+    const task = await popup;
+    await task.waitForURL(host + tasksPath + '/501');
+    await task.close();
+    assert.equal(await subject.getByRole('link', { name: /Research checkpoint/ }).count(), 0);
+
+    const upcoming = tab.locator('.mbgc-upcoming');
+    assert.equal(await upcoming.locator('li').count(), 2);
+    await upcoming.getByRole('button', { name: 'Try a grade for Quadratics test' }).click();
+    assert.equal(await tab.getByLabel('Subject', { exact: true }).inputValue(), '123');
+    assert.equal(await tab.getByLabel('Category', { exact: true }).inputValue(), 'Coursework');
+    assert.equal(await tab.getByLabel('Maximum points').inputValue(), '50');
+    assert.equal(await tab.getByLabel('Earned points').inputValue(), '');
+    await tab.getByLabel('Earned points').fill('50');
+    await tab.locator('.mbgc-grade-difference').getByText(/\+3\.50 percentage points/).waitFor();
+    await tab.getByRole('button', { name: 'Add to prediction' }).click();
+    await tab.locator('.mbgc-scenario').getByText('Quadratics test', { exact: true }).waitFor();
+    await tab.locator('.mbgc-actual').getByText('74.50%', { exact: true }).waitFor();
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    await upcoming.getByRole('button', { name: 'Try a grade for Research checkpoint' }).click();
+    assert.equal(await tab.getByLabel('Category', { exact: true }).inputValue(), '');
+    assert.equal(await tab.getByLabel('Maximum points').inputValue(), '');
+    assert.equal(await tab.getByRole('button', { name: 'Add to prediction' }).isDisabled(), true);
+
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    await tab.getByRole('button', { name: 'Refresh now' }).waitFor();
+    await tab.locator('.mbgc-settings > summary').click();
+    const priorReads = reads;
+    const height = await subject.locator('summary').evaluate((node) => node.offsetHeight);
+    await tab.getByLabel('Card density').selectOption('compact');
+    await tab.locator('.mbgc-stage[data-density="compact"]').waitFor();
+    assert.ok(await subject.locator('summary').evaluate((node) => node.offsetHeight) < height);
+    await tab.getByLabel('Show grade progress bars').uncheck();
+    await tab.locator('.mbgc-stage[data-progress-bars="false"]').waitFor();
+    assert.equal(await subject.locator('.mbgc-subject-grade .mbgc-track').isVisible(), false);
+    await tab.getByLabel('Animation intensity').selectOption('reduced');
+    await tab.locator('.mbgc-stage[data-motion="reduced"]').waitFor();
+    assert.equal(await subject.locator('summary').evaluate((node) => getComputedStyle(node.closest('.mbgc-subject')).transitionDuration), '0.07s');
+    await tab.emulateMedia({ reducedMotion: 'reduce' });
+    assert.equal(await subject.locator('summary').evaluate((node) => getComputedStyle(node.closest('.mbgc-subject')).transitionDuration), '0s');
+    await tab.getByLabel('Animation intensity').selectOption('off');
+    await tab.locator('.mbgc-stage[data-motion="off"]').waitFor();
+    assert.equal(reads, priorReads);
+
+    await tab.getByRole('button', { name: 'Show welcome guide' }).click();
+    await tab.getByRole('region', { name: welcome }).waitFor();
+    await tab.waitForFunction(() => document.querySelector('#mbgc-stage-host').shadowRoot.activeElement?.id === 'mbgc-welcome-heading');
+    await tab.getByRole('button', { name: 'Get started' }).click();
+    await tab.getByRole('region', { name: welcome }).waitFor({ state: 'detached' });
+
+    await context.close();
+    context = await openBrowser();
+    tab = await context.newPage();
+    await tab.goto(host + tasksPath + '#mbgc-overall-grades');
+    await tab.locator('.mbgc-stage[data-density="compact"][data-progress-bars="false"][data-motion="off"]').waitFor();
+    assert.equal(await tab.getByRole('region', { name: welcome }).count(), 0);
+    await context.serviceWorkers()[0].evaluate(() => chrome.storage.local.set({ 'mbgc:preferences': { method: 'absolute' } }));
+    await tab.reload();
+    await tab.getByLabel('Calculation method').waitFor();
+    assert.equal(await tab.getByRole('region', { name: welcome }).count(), 0);
+    const migrated = await context.serviceWorkers()[0].evaluate(async () =>
+      (await chrome.storage.local.get('mbgc:preferences'))['mbgc:preferences']);
+    assert.equal(migrated.welcomeSeen, true);
+    assert.equal(migrated.method, 'absolute');
+  } finally {
+    await context?.close();
+    await fs.rm(profile, { recursive: true, force: true });
   }
 });

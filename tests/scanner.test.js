@@ -366,3 +366,43 @@ test('background parser identifies a still-rendered previous term under the new 
   assert.equal(snapshot.diagnostic.loading, true);
   assert.equal(snapshot.complete, false);
 });
+
+test('upcoming tasks use verified deadlines and deduplicate task records without creating scores', () => {
+  const doc = fixture('class-tasks');
+  const list = doc.querySelector('[data-task-list]');
+  const add = (id, attributes, body = '') => list.insertAdjacentHTML('beforeend',
+    `<article class="task-card" ${attributes}><a href="/student/classes/123/core_tasks/${id}">Task ${id}</a>${body}</article>`);
+  add(101, 'data-category="Coursework" data-possible-points="40"', '<p class="due-date"><time datetime="2035-11-21T23:30:00-05:00"></time></p>');
+  add(102, 'data-due-at="2035-11-22T01:00:00+02:00"');
+  add(103, 'data-due-at="2035-11-23" data-completed="true"');
+  add(104, 'data-due-at="2035-11-23"');
+  add(105, 'data-due-at="2035-02-30"');
+  add(106, 'data-due-at="2035-11-23"', '<span class="points">10 / 20</span>');
+  add(107, '');
+  const snapshot = app.scan(doc, tasksURL);
+  const cache = app.freshCache();
+  app.mergeScan(cache, { ...snapshot, visible: true });
+  const current = cache.classes['123'].terms['term:71'];
+  assert.equal(current.records['101'].due, Date.parse('2035-11-22T04:30:00Z'));
+  assert.equal(current.records['101'].maxPoints, null);
+  assert.equal(current.records['101'].possiblePoints, 40);
+  assert.equal(current.records['105'].due, undefined);
+  cache.classes['123'].terms.unknown = { records: { 101: { ...current.records['101'], termId: null } } };
+  const upcoming = app.upcomingTasks(cache, app.currentTerms, Date.parse('2035-11-22T02:00:00Z'));
+  assert.deepEqual(upcoming.map(({ id }) => id), ['101', '104']);
+  assert.equal(upcoming[1].possiblePoints, undefined);
+  assert.equal(upcoming[1].category, undefined);
+  assert.deepEqual(app.upcomingTasks(cache, 'term:72', Date.parse('2035-11-22T02:00:00Z')), []);
+  assert.equal(app.upcomingTasks(cache, 'term:71', new Date(2035, 10, 23, 20).getTime()).at(-1)?.id, '104');
+  assert.deepEqual(app.upcomingTasks(cache, 'term:71', new Date(2035, 10, 24, 0).getTime()), []);
+});
+
+test('assessment destinations require a collected link and matching IDs on the school origin', () => {
+  const task = { classId: '123', id: '1', taskUrl: '/student/classes/123/core_tasks/1' };
+  assert.equal(app.taskDestination(task, tasksURL).href, tasksURL.href + '/1');
+  for (const taskUrl of [undefined, 'javascript:alert(1)', 'https://example.org' + task.taskUrl,
+    '/student/classes/999/core_tasks/1', '/student/classes/123/core_tasks/2', '/student/classes/123?task_id=1',
+    '/student/classes/123/core_tasks/1?next=example.org']) {
+    assert.equal(app.taskDestination({ ...task, taskUrl }, tasksURL), null);
+  }
+});

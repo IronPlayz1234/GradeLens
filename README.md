@@ -15,6 +15,10 @@ The project folder is the unpacked extension. It runs without a build, npm insta
 
 ## Grades and what-if scenarios
 
+- Expand a subject to search assessment titles and categories. Search only changes which rows are shown. Assessment links with a verified ManageBac task destination open in a new tab.
+- **Upcoming Assessments** uses due dates exposed on synced Class Tasks and Tasks & Deadlines pages. Dates with an explicit time zone display in the browser’s local time. Date-only deadlines stay visible through that local calendar day. Tasks with missing or unrecognized deadlines may be absent. **Try a grade** opens the correct subject, fills known assessment details, and leaves unknown inputs blank.
+- **Settings → Appearance** controls card density, decorative grade bars, and animation intensity. These choices are stored locally. The OS reduced-motion preference takes precedence. The welcome guide appears on new installations and can be reopened from Settings.
+
 - **Percentage Weights** averages individual task percentages per category. **Points-Based Averaging** pools points per category. **Absolute Weights** applies the category weight to each task. A category contributes only when it has a usable score and positive weight. A valid zero counts.
 - Enrolled subjects use the same scanner and the categories and weights shown for that class and term. The calculator uses earned and maximum assignment points. Letter-only grades, individual rubric criteria, and missing or malformed point values do not produce percentages. **No grade available** means there is insufficient evidence to calculate a grade. A genuine zero with a usable maximum displays as **0.00%**.
 - Expand a subject to see the scores, categories, weights, and last scan. An information icon explains whether the task list could be verified or a score or category needs attention. **Last sync out of date** means the class term hasn’t been successfully scanned in at least 15 minutes or two refresh intervals, whichever is longer.

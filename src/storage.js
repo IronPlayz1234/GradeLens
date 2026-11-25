@@ -5,6 +5,15 @@ const origin = 'https://uia.managebac.com';
 let pending = Promise.resolve();
 const tabLeases = new Map();
 
+chrome.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
+  if (reason !== 'update' || !previousVersion) return;
+  const key = 'mbgc:preferences';
+  void chrome.storage.local.get(key).then((result) => {
+    const preferences = result[key] ?? {};
+    if (!Object.hasOwn(preferences, 'welcomeSeen')) return chrome.storage.local.set({ [key]: { ...preferences, welcomeSeen: true } });
+  }).catch(() => {});
+});
+
 function enqueue(operation) {
   const work = pending.then(operation);
   pending = work.catch(() => {});

@@ -6,6 +6,8 @@
     refresh: 'M20 7v5h-5M4 17v-5h5m11 0a8 8 0 0 0-14-5m-2 5a8 8 0 0 0 14 5',
     chevron: 'm6 9 6 6 6-6',
     arrow: 'M4 12h15m-6-6 6 6-6 6',
+    external: 'M13 5h6v6m0-6-9 9m7-2v7H5V7h7',
+    search: 'M17 17l4 4m-2-10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
     close: 'm6 6 12 12M18 6 6 18',
     settings: 'M4 7h16M4 17h16M8 4v6m8 4v6',
     book: 'M5 4h13a1 1 0 0 1 1 1v15H6a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1Zm0 12h14M8 8h7',
@@ -189,6 +191,17 @@
     return node;
   }
 
+  function taskTitle(task) {
+    const url = app.taskDestination(task, location.href);
+    if (!url) return h('span', '', task.title);
+    const link = h('a', 'mbgc-assessment-link', task.title, icon('external'));
+    link.href = url.href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.setAttribute('aria-label', task.title + ' (opens in a new tab)');
+    return link;
+  }
+
   function categoryDetails(result, tasks) {
     const list = h('div', 'mbgc-categories');
     for (const category of result.breakdown) {
@@ -200,23 +213,58 @@
           h('strong', 'mbgc-category-value', percent(category.average))),
         track(category.average, category.name + ' average'));
       for (const task of category.tasks) {
-        const title = task.taskUrl ? h('a', 'mbgc-assessment-link', task.title) : h('span', '', task.title);
-        if (task.taskUrl) title.href = task.taskUrl;
-        row.append(h('div', 'mbgc-assessment',
-          h('div', '', title, h('small', 'mbgc-muted', [task.assessmentType, task.scenario ? 'Hypothetical' : '', task.issue || task.status].filter(Boolean).join(' · '))),
+        const assessment = h('div', 'mbgc-assessment',
+          h('div', '', taskTitle(task), h('small', 'mbgc-muted', [task.assessmentType, task.scenario ? 'Hypothetical' : '', task.issue || task.status].filter(Boolean).join(' · '))),
           h('span', 'mbgc-assessment-score', app.validScore(task) ?
             [`${task.earnedPoints} / ${task.maxPoints}`, h('small', 'mbgc-muted', percent(100 * task.earnedPoints / task.maxPoints))] :
             task.gradeKind === 'rubric' ? 'Rubric only' :
               task.gradeKind === 'letter' ? task.displayedLetter + ' (letter only)' :
-                task.issue ? 'Points unavailable' : 'Ungraded')));
+                task.issue ? 'Points unavailable' : 'Ungraded'));
+        assessment.dataset.search = app.key(task.title + ' ' + category.name);
+        row.append(assessment);
       }
       list.append(row);
     }
     if (!result.breakdown.length && tasks.length) {
       list.append(h('p', 'mbgc-muted', `${tasks.length} assessment records await a verified term.`));
-      for (const task of tasks) list.append(h('p', 'mbgc-muted', task.title));
+      for (const task of tasks) {
+        const assessment = h('p', 'mbgc-assessment', taskTitle(task));
+        assessment.dataset.search = app.key(task.title + ' ' + (task.category ?? ''));
+        list.append(assessment);
+      }
     }
     return list;
+  }
+
+  function searchableBreakdown(data, view) {
+    const key = data.classId + ':' + data.termKey;
+    const queryBySubject = view.searches ??= new Map();
+    const list = categoryDetails(data.result, data.tasks);
+    const input = h('input', 'mbgc-input');
+    Object.assign(input, { type: 'search', placeholder: 'Search assessments...', value: queryBySubject.get(key) ?? '' });
+    input.setAttribute('aria-label', 'Search assessments for ' + data.title);
+    const matches = [...list.querySelectorAll('[data-search]')];
+    const categories = [...list.querySelectorAll('.mbgc-category')].map((group) => [group, [...group.querySelectorAll('[data-search]')]]);
+    const status = h('p', 'mbgc-search-result mbgc-muted');
+    status.setAttribute('role', 'status');
+    const clear = button('Clear search', () => { input.value = ''; filter(); input.focus(); });
+    function filter() {
+      queryBySubject.set(key, input.value);
+      const terms = app.key(input.value).split(' ').filter(Boolean);
+      let count = 0;
+      for (const row of matches) {
+        row.hidden = !terms.every((term) => row.dataset.search.includes(term));
+        if (!row.hidden) count++;
+      }
+      for (const [group, rows] of categories) group.hidden = Boolean(terms.length) && !rows.some((row) => !row.hidden);
+      clear.hidden = !input.value;
+      status.textContent = !terms.length ? '' : count
+        ? `${count} matching ${count === 1 ? 'assessment' : 'assessments'}.`
+        : 'No matches among the assessments shown. Try a different search.';
+    }
+    input.addEventListener('input', filter);
+    filter();
+    return h('div', '', h('div', 'mbgc-assessment-search', icon('search'), input, clear), status, list);
   }
 
   function gradeNotice(data) {
@@ -286,7 +334,7 @@
     details.open = view.expanded.has(data.classId);
     let breakdown;
     function openBreakdown() {
-      if (!breakdown) breakdown = categoryDetails(data.result, data.tasks);
+      if (!breakdown) breakdown = searchableBreakdown(data, view);
       const content = details.querySelector('.mbgc-subject-detail');
       if (content && breakdown.parentNode !== content) content.append(breakdown);
     }
@@ -344,7 +392,7 @@
     return data;
   }
 
-  function settings(sync, subjects, view) {
+  function settings(sync, subjects, view, handlers) {
     const content = h('details', 'mbgc-settings');
     content.open = view.settings;
     content.addEventListener('toggle', () => { view.settings = content.open; });
@@ -356,6 +404,14 @@
     const classChoice = select(subjects, view.settingsClass);
     const weights = h('textarea', 'mbgc-input');
     const scale = h('textarea', 'mbgc-input');
+    const density = select([['comfortable', 'Comfortable'], ['compact', 'Compact']], sync.settings.density,
+      (value) => sync.setSettings({ density: value }));
+    const motion = select([['full', 'Full'], ['reduced', 'Reduced'], ['off', 'Off']], sync.settings.motion,
+      (value) => sync.setSettings({ motion: value }));
+    const bars = h('input', 'mbgc-checkbox');
+    bars.type = 'checkbox';
+    bars.checked = sync.settings.progressBars;
+    bars.addEventListener('change', () => sync.setSettings({ progressBars: bars.checked }));
     const feedback = h('p', 'mbgc-feedback');
     feedback.setAttribute('role', 'status');
     for (const input of [weights, scale]) input.rows = 4;
@@ -394,6 +450,10 @@
     });
     content.append(h('summary', '', icon('settings'), 'Settings', icon('chevron')),
       h('div', 'mbgc-settings-body',
+        h('section', 'mbgc-appearance', h('h3', '', 'Appearance'),
+          h('div', 'mbgc-appearance-controls', field('Card density', density), field('Animation intensity', motion),
+            h('label', 'mbgc-toggle-label', bars, 'Show grade progress bars')),
+          button('Show welcome guide', handlers.showWelcome, 'info')),
         h('div', 'mbgc-settings-grid',
           h('div', '', field('Refresh interval (minutes)', minutes), text),
           h('div', '', field('Class for manual weights', classChoice), field('Category weights', weights)),
@@ -406,11 +466,51 @@
     return content;
   }
 
+  function welcomeGuide(handlers) {
+    const heading = h('h2', '', 'Welcome to your grades! 🎓');
+    heading.id = 'mbgc-welcome-heading';
+    heading.tabIndex = -1;
+    const panel = h('section', 'mbgc-panel mbgc-welcome',
+      heading, h('p', 'mbgc-muted', 'See your calculated grades, explore your assessments, and find out how future scores could change your results.'),
+      h('div', 'mbgc-welcome-sections',
+        h('section', '', h('h3', '', 'Your overall grades'),
+          h('p', '', 'See your estimated overall percentage and letter grade for each subject.')),
+        h('section', '', h('h3', '', 'Choose how grades are calculated'),
+          h('p', '', 'Switch methods to see how weighting changes the result.'),
+          h('ul', '', ...Object.values(app.methods).map(({ label, explanation }) => h('li', '', h('strong', '', label), ' — ', explanation)))),
+        h('section', '', h('h3', '', 'Try future scores'),
+          h('p', '', 'Use Grade Estimator to see how upcoming tests and assignments might affect your grade.'))),
+      h('p', 'mbgc-welcome-note', 'These are calculated estimates, not official grades. Your school may use a different calculation method.'),
+      h('div', 'mbgc-actions', button('Get started', handlers.dismissWelcome, 'arrow', 'mbgc-primary'),
+        button('Skip guide', handlers.dismissWelcome, null, 'mbgc-welcome-skip')));
+    panel.setAttribute('aria-labelledby', heading.id);
+    return panel;
+  }
+
+  function upcomingPanel(sync, view, handlers) {
+    const tasks = app.upcomingTasks(sync.cache, view.term);
+    view.nextDue = tasks[0]?.expiresAt;
+    const time = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    const day = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
+    const list = h('ul', 'mbgc-upcoming-list', tasks.map((task) => {
+      const due = typeof task.due === 'number' ? time.format(task.due) : day.format(new Date(task.due + 'T12:00:00'));
+      const meta = [task.subject, 'Due ' + due, task.category, task.possiblePoints ? number(task.possiblePoints, 6) + ' points' : ''].filter(Boolean);
+      const tryGrade = button('Try a grade', () => handlers.tryTask(task), 'estimator');
+      tryGrade.setAttribute('aria-label', 'Try a grade for ' + task.title);
+      return h('li', 'mbgc-upcoming-task', h('div', '', h('strong', '', taskTitle(task)),
+        h('p', 'mbgc-muted', meta.join(' · '))), tryGrade);
+    }));
+    return h('section', 'mbgc-panel mbgc-upcoming', h('h2', '', 'Upcoming Assessments'),
+      tasks.length ? list : h('p', 'mbgc-muted', 'No upcoming assessments found in the tasks synced so far.'),
+      tasks.length ? h('p', 'mbgc-muted mbgc-upcoming-note', 'Shows tasks with a future due date in the synced data.') : null);
+  }
+
   function header(sync, kind, view, handlers, termOptions) {
     const isEstimator = kind === 'estimator';
     const termChoice = select(termOptions, view.term, (id) => {
       view.term = id;
       view.scenario = null;
+      view.upcomingTask = null;
       handlers.render();
     });
     termChoice.disabled = !termOptions.length;
@@ -458,6 +558,7 @@
     const subjects = classes.filter(([, entry]) => view.term === app.currentTerms || entry.terms[view.term] ||
       (view.term !== 'unknown' && !Object.keys(entry.terms).some((id) => id !== 'unknown')));
     const content = h('div', 'mbgc-page', header(sync, 'grades', view, handlers, termOptions));
+    if (view.welcomeOpen || !sync.settings.welcomeSeen) content.append(welcomeGuide(handlers));
     const rows = subjects.map(([id, item]) => gradeData(sync, id,
       view.term === app.currentTerms ? app.classTermKey(item) : view.term));
     const hasEstimate = rows.some((data) => Number.isFinite(data.result.percentage));
@@ -478,8 +579,9 @@
       recovery.append(button('Retry', () => sync.refresh(true), 'refresh'));
       content.append(recovery);
     }
-    content.append(h('p', 'mbgc-footnote', 'The school’s term calculation method and letter scale are unverified. Partial scans can miss assessments.'),
-      settings(sync, classes.map(([id, item]) => [id, item.name || 'Class ' + id]), view));
+    content.append(upcomingPanel(sync, view, handlers),
+      h('p', 'mbgc-footnote', 'The school’s term calculation method and letter scale are unverified. Partial scans can miss assessments.'),
+      settings(sync, classes.map(([id, item]) => [id, item.name || 'Class ' + id]), view, handlers));
     return content;
   }
 
@@ -507,7 +609,8 @@
     [...next.children].forEach((section, index) => {
       if (section === nextList) return;
       const old = oldSections[index];
-      const inputs = (node) => [...node.querySelectorAll('select, input, textarea')].map((input) => input.value).join('\u0000');
+      const inputs = (node) => [...node.querySelectorAll('select, input, textarea')].map((input) =>
+        input.type === 'checkbox' ? input.checked : input.value).join('\u0000');
       if (old && (!old.isEqualNode(section) || inputs(old) !== inputs(section))) old.replaceWith(section);
     });
     current.className = next.className;
@@ -531,6 +634,7 @@
     const choice = select(subjects, view.classId, (id) => {
       view.classId = id;
       view.scenario = null;
+      view.upcomingTask = null;
       handlers.render();
     });
     page.append(h('div', 'mbgc-estimator-subject', field('Subject', choice)));
@@ -553,14 +657,24 @@
         target: 80, targetMode: 'percentage', targetLetter: data.scale.find(([min]) => min <= 80)?.[1] ?? data.scale[0][1] };
     }
     const model = view.scenario ??= defaults();
-    if (!categories.includes(model.pick)) model.pick = firstCategory;
+    if (view.upcomingTask?.classId === view.classId) {
+      const task = view.upcomingTask;
+      const actual = data.tasks.find((item) => item.id === task.id && app.validScore(item));
+      const category = actual?.category || task.category;
+      Object.assign(model, { title: task.title, points: NaN, max: actual?.maxPoints ?? task.possiblePoints ?? NaN,
+        pick: categories.find((name) => app.key(name) === app.key(category)) ?? '', replaces: actual?.id ?? '' });
+      view.upcomingTask = null;
+    }
+    if (!categories.includes(model.pick)) model.pick = model.title ? '' : firstCategory;
     const replaceable = data.tasks.filter((task) => app.validScore(task) &&
       categories.some((name) => app.key(name) === app.key(task.category)) &&
       !model.entries.some((entry) => entry.id !== model.editing && entry.replaces === task.id));
     if (!replaceable.some((task) => task.id === model.replaces)) model.replaces = '';
     if (!data.scale.some(([, label]) => label === model.targetLetter)) model.targetLetter = defaults().targetLetter;
 
-    const category = select(categories.map((name) => [name, name]), model.pick, (name) => {
+    const categoryOptions = categories.map((name) => [name, name]);
+    if (!model.pick) categoryOptions.unshift(['', 'Choose a category']);
+    const category = select(categoryOptions, model.pick, (name) => {
       model.pick = name;
       model.previewPaused = false;
       model.replaces = '';
@@ -568,6 +682,7 @@
     });
     function selectAssessment(task) {
       model.previewPaused = false;
+      delete model.title;
       if (task) {
         model.replaces = task.id;
         model.pick = categories.find((name) => app.key(name) === app.key(task.category));
@@ -586,7 +701,7 @@
     const mode = h('div', 'mbgc-mode', futureMode, changeMode);
     mode.setAttribute('role', 'group');
     mode.setAttribute('aria-label', 'What would you like to do?');
-    const points = numericInput(model.points, 0, model.max);
+    const points = numericInput(model.points, 0, Number.isFinite(model.max) ? model.max : '');
     const max = numericInput(model.max, 0.01, 1000000);
     const slider = h('input', 'mbgc-slider');
     Object.assign(slider, { type: 'range', min: 0, max: 100, step: 0.1, value: 100 * model.points / model.max });
@@ -618,11 +733,12 @@
 
     function draft(earned = model.points) {
       return { id: model.editing ?? 'scenario:' + (view.nextId + 1), replaces: model.replaces,
-        title: data.tasks.find((task) => task.id === model.replaces)?.title || 'Future ' + model.pick,
+        title: data.tasks.find((task) => task.id === model.replaces)?.title || model.title || 'Future ' + model.pick,
         category: model.pick, earnedPoints: earned, maxPoints: model.max, scenario: true };
     }
     function update() {
-      const usable = app.validScore({ earnedPoints: model.points, maxPoints: model.max }) && model.max >= .01 && model.max <= 1000000;
+      const usableMax = model.max >= .01 && model.max <= 1000000;
+      const usable = categories.includes(model.pick) && usableMax && app.validScore({ earnedPoints: model.points, maxPoints: model.max });
       const input = draft();
       const entries = model.entries.filter((entry) => entry.id !== model.editing);
       const base = app.withHypotheticals(data.tasks, entries);
@@ -631,7 +747,10 @@
       const governedByOverride = Object.hasOwn(model.overrides, app.key(model.pick));
       sliderValue.textContent = usable ? percent(100 * model.points / model.max) : '—';
       slider.style.setProperty('--mbgc-progress', usable ? (100 * model.points / model.max) + '%' : '0%');
-      warning.textContent = !usable ? 'Enter a score from zero to the maximum points.' :
+      slider.disabled = !usableMax;
+      warning.textContent = !model.pick ? 'Choose a category for this assessment.' :
+        !usableMax ? 'Enter the maximum points for this assessment.' :
+        !usable ? 'Enter a score from zero to the maximum points.' :
         governedByOverride ? 'Remove the category override to model an individual score in this category.' : '';
       predictedScore.replaceChildren(score(usable ? result.percentage : null, data.scale));
       updateTrack(predictedTrack, usable ? result.percentage : null);
@@ -689,12 +808,13 @@
       update();
     });
     const add = button(model.editing ? 'Save prediction' : 'Add to prediction', () => {
-      if (!app.validScore(draft()) || !max.checkValidity()) return;
+      if (!categories.includes(model.pick) || !app.validScore(draft()) || !max.checkValidity()) return;
       const task = draft();
       if (!model.editing) view.nextId++;
       model.entries = [...model.entries.filter((entry) => entry.id !== model.editing), task];
       view.scenariosOpen = true;
       delete model.editing;
+      delete model.title;
       model.replaces = '';
       model.previewPaused = true;
       handlers.render();
@@ -703,7 +823,7 @@
       model.entries.map((task) => h('div', 'mbgc-scenario',
         h('div', '', h('strong', '', task.title), h('small', 'mbgc-muted', `${task.earnedPoints} / ${task.maxPoints}`)),
         button('Edit', () => {
-          Object.assign(model, { editing: task.id, pick: task.category, points: task.earnedPoints, max: task.maxPoints,
+          Object.assign(model, { editing: task.id, title: task.title, pick: task.category, points: task.earnedPoints, max: task.maxPoints,
             replaces: task.replaces, previewPaused: false });
           handlers.render();
         }),
@@ -757,6 +877,7 @@
           h('div', 'mbgc-panel-heading', h('span', 'mbgc-mark', icon('estimator')), h('div', '', h('h2', '', 'Try a grade'),
             h('p', 'mbgc-muted', 'What would you like to do?'))),
           mode,
+          model.title ? h('p', 'mbgc-upcoming-context', model.title) : null,
           h('p', 'mbgc-mode-help mbgc-muted', model.replaces
             ? 'Preview a different score for an assessment you’ve already taken.'
             : 'See how one more assessment could change your grade.'),

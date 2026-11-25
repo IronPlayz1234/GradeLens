@@ -332,11 +332,12 @@
         if (location.type === 'overview' && label && !/^(overview|class|back)$/i.test(label)) classes[location.classId] = label;
       }
       if (location.type === 'workspace') {
-        // Preserve only a student-visible, link-backed Past filter.
-        if (/^past$/i.test(txt(link))) {
+        // Reuse native, link-backed workspace filters.
+        const filter = txt(link).toLowerCase();
+        if (['past', 'upcoming'].includes(filter)) {
           const params = new URLSearchParams();
           for (const [name, value] of destination.searchParams) {
-            if (['tab', 'view', 'filter', 'period', 'timeframe', 'status', 'type'].includes(name) && /^past$/i.test(value)) {
+            if (['tab', 'view', 'filter', 'period', 'timeframe', 'status', 'type'].includes(name) && value.toLowerCase() === filter) {
               params.set(name, value);
             }
           }
@@ -410,13 +411,42 @@
           return target && route(target).type === 'task';
         });
         if (links.some((item) => localURL(item.getAttribute('href'), url).pathname !== destination.pathname)) break;
-        if (row.matches('tr,[role="row"]') || row.querySelector([selectors.score, selectors.points, selectors.letter, selectors.rubric].join(','))) {
+        if (row.matches('tr,[role="row"],li[data-due-at],article[data-due-at]') ||
+          row.querySelector([selectors.score, selectors.points, selectors.letter, selectors.rubric].join(','))) {
           nodes.add(row);
           break;
         }
       }
     }
     return [...nodes];
+  }
+
+  const taskMetadata = '[data-due-at],[data-due-date],[data-due-datetime],[data-completed],[data-possible-points],[data-total-points],.task-due-date,.due-date,.due-at';
+
+  function readDueDate(node) {
+    const due = node.querySelector('[data-due-at],[data-due-date],[data-due-datetime],.task-due-date,.due-date,.due-at,time[data-role="due"]');
+    const values = [node, due].flatMap((item) => ['data-due-at', 'data-due-datetime', 'data-due-date', 'datetime']
+      .map((attr) => item?.getAttribute(attr)));
+    values.push(due?.querySelector('time[datetime]')?.getAttribute('datetime'));
+    let dateOnly = null;
+    for (const raw of values) {
+      const value = clean(raw);
+      if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/i.test(value)) continue;
+      const date = value.slice(0, 10);
+      const day = new Date(date + 'T00:00:00Z');
+      if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== date) continue;
+      if (/T.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
+        const timestamp = Date.parse(value);
+        if (Number.isFinite(timestamp)) return timestamp;
+      } else dateOnly ??= date;
+    }
+    return dateOnly;
+  }
+
+  function taskDestination(task, base) {
+    const url = localURL(task.taskUrl, base);
+    const target = url && route(url);
+    return target?.type === 'task' && target.classId === task.classId && target.taskId === task.id && !url.search && !url.hash ? url : null;
   }
 
   function readTask(node, url, context, term, classes, weights, detail = false) {
@@ -503,6 +533,14 @@
       result.gradeKind = 'points';
       if (!category) result.issue = 'Category unavailable or ambiguous';
     }
+    const due = readDueDate(node);
+    const maximum = [node, node.querySelector('[data-possible-points],[data-total-points]'), ...points].filter(Boolean).map((item) =>
+      numeric(item.getAttribute('data-possible-points') || item.getAttribute('data-total-points') ||
+        item.getAttribute('data-max-points'))).find((value) => value > 0);
+    if (due !== null) result.due = due;
+    if (maximum) result.possiblePoints = maximum;
+    if (node.matches('[data-completed="true"]') || /^(?:submitted|completed|turned in|graded)$/i.test(result.status)) result.completed = true;
+    else if (node.matches('[data-completed="false"]') || /^(?:not submitted|pending|upcoming)$/i.test(result.status)) result.completed = false;
     return result;
   }
 
@@ -564,7 +602,7 @@
           (previous.category && task.category && app.key(previous.category) !== app.key(task.category)))) {
         records.set(key, { ...task, earnedPoints: null, maxPoints: null, issue: 'Conflicting assessment records' });
       } else if (!previous || (previous.issue !== 'Conflicting assessment records' && app.validScore(task))) {
-        records.set(key, previous ? { ...task, subject: task.subject || previous.subject,
+        records.set(key, previous ? { ...previous, ...task, subject: task.subject || previous.subject,
           assessmentType: task.assessmentType || previous.assessmentType, category: task.category || previous.category,
           displayedLetter: task.displayedLetter || previous.displayedLetter, status: task.status || previous.status } : task);
       }
@@ -607,5 +645,5 @@
     };
   }
 
-  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, selfProfile, profileEmail, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks });
+  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, selfProfile, profileEmail, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks, taskDestination, taskMetadata });
 })();

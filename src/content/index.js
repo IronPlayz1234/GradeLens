@@ -247,12 +247,14 @@
     const focused = stageHost.shadowRoot?.activeElement ?? document.activeElement;
     const focusable = 'button, select, input, textarea, summary, a[href]';
     if (!before.contains(focused)) return;
-    const visible = (node) => !node.closest('details:not([open])') || node.matches('summary');
+    const visible = (node) => (!node.closest('details:not([open])') || node.matches('summary')) && !node.closest('[hidden]');
     const old = [...before.querySelectorAll(focusable)].filter(visible);
     const position = old.indexOf(focused);
     const label = focused.closest('label')?.querySelector('.mbgc-field-label')?.textContent;
     const candidate = [...after.querySelectorAll(focusable)].filter(visible);
-    const replacement = label ? candidate.find((node) => node.closest('label')?.querySelector('.mbgc-field-label')?.textContent === label) :
+    const name = focused.getAttribute('aria-label');
+    const replacement = name ? candidate.find((node) => node.getAttribute('aria-label') === name) : label ?
+      candidate.find((node) => node.closest('label')?.querySelector('.mbgc-field-label')?.textContent === label) :
       candidate[position]?.tagName === focused.tagName ? candidate[position] : null;
     return replacement ?? null;
   }
@@ -273,6 +275,12 @@
       force = true;
     }
     installNav();
+    for (const root of [stage, card]) {
+      for (const key of ['density', 'motion', 'progressBars']) {
+        const value = String(sync.settings[key]);
+        if (root.dataset[key] !== value) root.dataset[key] = value;
+      }
+    }
     const nextTheme = app.getTheme(nativeAnchor);
     const nextThemeKey = JSON.stringify(nextTheme);
     if (nextThemeKey !== themeKey) {
@@ -296,7 +304,34 @@
       if (force || viewKey !== contentKey) {
         const editor = stageHost.shadowRoot?.activeElement ?? document.activeElement;
         if (!force && editor?.matches('textarea') && stage.contains(editor)) return;
-        const handlers = { close: closeView, render: () => render(true) };
+        const handlers = {
+          close: closeView, render: () => render(true),
+          tryTask: (task) => {
+            view.classId = task.classId;
+            if (task.termKey === 'unknown') view.term = app.currentTerms;
+            view.scenario = null;
+            view.upcomingTask = task;
+            openView('#mbgc-grade-estimator');
+            (stage.querySelector('.mbgc-model input[type="number"]') ?? stage.querySelector('.mbgc-estimator-subject select'))?.focus();
+          },
+          showWelcome: () => {
+            view.welcomeOpen = true;
+            render(true);
+            stage.querySelector('#mbgc-welcome-heading')?.focus();
+          },
+          dismissWelcome: () => {
+            const reopened = view.welcomeOpen;
+            view.welcomeOpen = false;
+            void sync.setSettings({ welcomeSeen: true });
+            render(true);
+            const target = reopened ? [...stage.querySelectorAll('button')].find((button) => button.textContent === 'Show welcome guide')
+              : stage.querySelector('h1');
+            if (target) {
+              if (target.matches('h1')) target.tabIndex = -1;
+              target.focus({ preventScroll: true });
+            }
+          }
+        };
         const content = panel === 'grades' ? app.dashboard(sync, view, handlers) : app.estimator(sync, view, handlers);
         const focus = focusReplacement(stage, content);
         if (lastRenderedMethod && lastRenderedMethod !== sync.settings.method) {
@@ -386,7 +421,7 @@
 
   const gradeRoots = [app.selectors.tasks, app.selectors.score, app.selectors.points, app.selectors.letter, app.selectors.rubric].join(',');
   const chartRoots = 'canvas,svg,[data-chart],.chart-frame,.highcharts-container';
-  const relevant = [gradeRoots, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
+  const relevant = [gradeRoots, app.taskMetadata, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
     app.discoveryLinks, app.accountLinks, 'a[href*="/core_tasks/"],a[href*="/tasks/"]', 'table,thead,h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4,.title',
     '[data-task-list],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
   const structure = relevant + ',main,[role="main"],#content,[data-all-tasks]';
@@ -428,7 +463,8 @@
   const observer = new MutationObserver(handleMutations);
   observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
     attributeFilter: ['data-selected-term-id', 'data-term-id', 'data-total-count', 'class', 'style', 'hidden', 'aria-hidden',
-      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
+      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme',
+      'datetime', 'data-due-at', 'data-due-date', 'data-due-datetime', 'data-completed', 'data-possible-points', 'data-total-points'] });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   window.addEventListener('popstate', reconcile);
   window.addEventListener('hashchange', reconcile);
@@ -437,6 +473,11 @@
     if (event.target.matches?.(app.selectors.termControls) && !owns(event.target)) queueScan();
   }, true);
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !event.defaultPrevented && stage.querySelector('.mbgc-welcome')) {
+      event.preventDefault();
+      stage.querySelector('.mbgc-welcome-skip').click();
+      return;
+    }
     if (event.key === 'Escape' && !event.defaultPrevented && views[location.hash] && stageHost.classList.contains('mbgc-stage-fixed')) {
       event.preventDefault();
       closeView();
@@ -455,6 +496,11 @@
   window.addEventListener('resize', scheduleRender);
   setInterval(() => {
     if (location.href !== lastURL) reconcile();
+    if (!document.hidden && views[location.hash] === 'grades' && Date.now() >= view.nextDue) {
+      view.nextDue = undefined;
+      viewKey = '';
+      scheduleRender();
+    }
     if (!document.hidden && app.studentPath(location.pathname)) sync.refresh();
   }, 15000);
   void isolateDashboard().catch(() => {});
