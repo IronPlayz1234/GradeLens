@@ -219,6 +219,8 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     assert.equal(widths.headerMax, 'none');
     await page.getByText('54.00%', { exact: true }).waitFor();
     await page.getByText('Sync diagnostics', { exact: true }).click();
+    const { version } = JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8'));
+    await page.getByText('Extension version ' + version, { exact: true }).waitFor();
     await page.getByText(/3 assessments read of 3 candidates · 2 with usable points/).waitFor();
     await page.getByRole('link', { name: 'Grade Estimator' }).click();
     await page.locator('.mbgc-actual .mbgc-numeral', { hasText: '54.00%' }).waitFor();

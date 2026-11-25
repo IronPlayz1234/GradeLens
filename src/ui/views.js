@@ -81,6 +81,7 @@
     details.open = Boolean(view.diagnosticsOpen);
     details.addEventListener('toggle', () => { view.diagnosticsOpen = details.open; });
     details.append(h('summary', '', 'Sync diagnostics'));
+    details.append(h('p', 'mbgc-muted', 'Extension version ' + chrome.runtime.getManifest().version));
     const storage = sync.storageState === 'session' ? 'Verified student grade cache' :
       sync.storageState === 'unavailable' ? 'Grade cache unavailable · current document only' :
         'Current document only · student identity could not be verified';
