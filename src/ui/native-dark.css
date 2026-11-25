@@ -16,6 +16,11 @@ html[data-mbgc-native-dark] {
   --mbgc-native-warning: #f6cd86;
   --mbgc-native-info: #a8cdfb;
   --mbgc-native-link: var(--mbgc-native-ink, #a8cdfb);
+  --mbgc-native-control: #202a36;
+  --mbgc-native-disabled: #9baabd;
+  --mbgc-native-weekend: #19212b;
+  --mbgc-native-stripe: #202a35;
+  --mbgc-native-focus: var(--mbgc-native-ink, #a8cdfb);
   background: var(--mbgc-native-bg);
 }
 /* Paint foreground and background together at each surface boundary. */
@@ -35,7 +40,7 @@ html[data-mbgc-native-dark] :is(
   .details-panel,[data-details-panel],[data-all-tasks],[data-task-list],.task-card,.assignment-card,.assessment-card,.short-assignment,
   .list-group-item,.well,.bg-white,.bg-light,.class-banner-content,.group-banner-content,.class-header-content,.group-header-content,
   [data-class-header-content],[data-group-header-content],.workspace-welcome,.dashboard-shortcut,[data-workspace-shortcut],
-  .activity-feed,.activity-item,.latest-activity,[data-activity-feed],#latest-activity,.tab-content,[data-mbgc-neutral-surface]):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
+  .activity-feed,.activity-item,.latest-activity,[data-activity-feed],#latest-activity,.tab-content,[data-mbgc-neutral-surface]):where(:not([data-mbgc-audit-part="lesson"],[data-mbgc-audit-part="event"])):where(:not(.mbgc-owned,.mbgc-owned *,[data-category-color],.badge,.badge *,.fc-event,.fc-event *,[data-banner-artwork],.banner-artwork)) {
   background-color: var(--mbgc-native-surface) !important;
   color: var(--mbgc-native-text) !important;
   border-color: var(--mbgc-native-border) !important;
@@ -71,7 +76,7 @@ html[data-mbgc-native-dark] :is(main,[role="main"],#content,#main-content,.main-
     .class-title,.group-title,[data-class-title],[data-group-title]):where(:not(.mbgc-owned,.mbgc-owned *,.alert *,.badge,.badge *,.fc-event *,
       .btn-primary *,.text-danger,.text-success,.text-warning,.text-info,.text-muted,.text-secondary,
       [data-category-color],[data-category-color] *,[data-banner-artwork] *, .banner-artwork *)) {
-  color: var(--mbgc-native-text) !important;
+  color: var(--mbgc-card-ink, var(--mbgc-native-text)) !important;
 }
 html[data-mbgc-native-dark] :is(.nav-tabs,[role="tablist"]) :is(.nav-link,[role="tab"],a[href]):where(:not(.mbgc-owned,.mbgc-owned *)) {
   background-color: transparent !important;
@@ -83,11 +88,11 @@ html[data-mbgc-native-dark] :is(.nav-tabs,[role="tablist"]) :is(.active,[aria-se
   color: var(--mbgc-native-link) !important;
 }
 html[data-mbgc-native-dark] :is(.text-muted,.text-secondary,.help-block,.form-text):not(.mbgc-owned,.mbgc-owned *) {
-  color: var(--mbgc-native-muted) !important;
+  color: var(--mbgc-card-secondary, var(--mbgc-native-muted)) !important;
 }
 html[data-mbgc-native-dark] :is(main,[role="main"],.sidebar,.navbar,body > header,.card,.panel) a[href]:not(
   .mbgc-owned,.mbgc-owned *,[data-mbgc-nav-native],.btn,.badge,.fc-event,.fc-event *,.text-danger,.text-warning,.text-success,.text-info) {
-  color: var(--mbgc-native-link);
+  color: var(--mbgc-card-ink, var(--mbgc-native-link));
 }
 html[data-mbgc-native-dark] :is(.sidebar,[data-sidebar],.navbar,.topbar) a[href]:not(
   .mbgc-owned,.mbgc-owned *,[data-mbgc-nav-native],.btn,.badge,.text-danger,.text-success,.text-warning,.text-info) {

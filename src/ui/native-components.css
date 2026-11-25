@@ -1,0 +1,161 @@
+/* Native student components only. These scopes are selected by the DOM adapter. */
+html[data-mbgc-native-dark] [data-mbgc-audit-part="notification-table"] {
+  --bs-table-bg: var(--mbgc-native-surface);
+  --bs-table-striped-bg: var(--mbgc-native-stripe);
+  --bs-table-striped-color: var(--mbgc-native-text);
+  --bs-table-hover-bg: var(--mbgc-native-hover);
+  color: var(--mbgc-native-text);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="notification-table"] :where(thead,tbody,tr,th,td,[role="row"],[role="cell"],[role="columnheader"]) {
+  --bs-table-accent-bg: transparent;
+  --bs-table-bg-type: transparent;
+  --bs-table-bg-state: transparent;
+  background-color: var(--mbgc-notification-row, var(--mbgc-native-surface)) !important;
+  border-color: var(--mbgc-native-border);
+  color: var(--mbgc-native-text) !important;
+}
+/* Bootstrap strips cells with an inset paint layer separate from background-color. */
+html[data-mbgc-native-dark] [data-mbgc-audit-part="notification-table"] :is(th,td,[role="cell"],[role="columnheader"]) { box-shadow: none !important; }
+html[data-mbgc-native-dark] [data-mbgc-audit-part="notification-table"] :is(tbody > tr:nth-child(odd),[role="row"]:nth-child(odd)) {
+  --mbgc-notification-row: var(--mbgc-native-stripe);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="notification-table"] :is(th,[role="columnheader"]) {
+  --mbgc-notification-row: var(--mbgc-native-secondary);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="notification-table"] :where(label,strong,span,small,.notification-title,.notification-description):not(.badge,.badge *) {
+  color: inherit;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="notification-table"] :is(.notification-title,.notification-description,.notification-section-title,th > span,td > strong,td > span,[role="cell"] > span):not(.badge,.badge *,[data-status]) {
+  color: var(--mbgc-native-text) !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="notification-table"] input[type="checkbox"] {
+  accent-color: var(--mbgc-native-focus);
+}
+
+/* Preserve tinted lesson/event fills. Darken neutral fills and choose ink for the actual color.
+   Keep each colored status badge and its descendants on their original color pair. */
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="lesson"],[data-mbgc-audit-part="event"])[data-mbgc-audit-tone="light"] {
+  --mbgc-card-ink: #000;
+  --mbgc-card-secondary: #162131;
+}
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="lesson"],[data-mbgc-audit-part="event"]):is([data-mbgc-audit-tone="dark"],[data-mbgc-audit-tone="neutral"]) {
+  --mbgc-card-ink: #fff;
+  --mbgc-card-secondary: var(--mbgc-native-muted);
+}
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="lesson"],[data-mbgc-audit-part="event"])[data-mbgc-audit-tone="neutral"] {
+  background-color: var(--mbgc-native-secondary) !important;
+}
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="lesson"],[data-mbgc-audit-part="event"])[data-mbgc-audit-tone] {
+  color: var(--mbgc-card-ink);
+}
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="lesson"],[data-mbgc-audit-part="event"])[data-mbgc-audit-tone]
+  :is(a,span,p,strong,small,time,div,h2,h3,h4,.fc-event-main):not(.badge,.badge *,[data-status],[data-status] *, .event-count, .event-count *, .status, .status *, svg *) {
+  color: var(--mbgc-card-ink) !important;
+}
+html[data-mbgc-native-dark] :is([data-mbgc-audit-page="timetable"],[data-mbgc-audit-page="calendar"])
+  :is(th,[role="columnheader"],[role="rowheader"],.fc-col-header-cell-cushion,.fc-daygrid-day-number,.fc-list-day-text,.fc-list-day-side-text,.timetable-day,.period-label) {
+  color: var(--mbgc-native-text) !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page="calendar"] :is(.fc-day-sat,.fc-day-sun,.weekend,[data-weekend]):where(td,[role="gridcell"],.fc-daygrid-day,.fc-timegrid-col):not(.fc-day-today) {
+  background-color: var(--mbgc-native-weekend) !important;
+  color: var(--mbgc-native-text);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page="timetable"] :is(.period-number,.timetable-period-badge) {
+  background-color: var(--mbgc-native-secondary);
+  border-color: var(--mbgc-native-border);
+  color: var(--mbgc-native-text);
+}
+
+/* Main and detached navigation panels share the same dark row and header colors. */
+html[data-mbgc-native-dark] [data-mbgc-audit-part="menu"] {
+  background-color: var(--mbgc-native-nav) !important;
+  border-color: var(--mbgc-native-border);
+  color: var(--mbgc-native-text);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="menu-title"] {
+  background-color: var(--mbgc-native-nav);
+  color: var(--mbgc-native-text) !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="menu"] :is(.menu-heading,.menu-header,.sidebar-header,.flyout-header,.dropdown-header,.profile-subtitle,.profile-description) {
+  color: var(--mbgc-native-muted) !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="menu"] :is(a[href],[role="menuitem"],[data-mbgc-nav-row]):not(.badge,.badge *,[aria-disabled="true"]) {
+  color: var(--mbgc-native-text);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="menu"] :is(a[href],[role="menuitem"],[data-mbgc-nav-row]):hover:not([aria-disabled="true"]) {
+  background-color: var(--mbgc-native-hover) !important;
+  color: var(--mbgc-native-text) !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="menu"] :is([data-mbgc-nav-native],[data-mbgc-audit-selected],.mbgc-nav[aria-current="page"]) {
+  background-color: var(--mbgc-native-selection) !important;
+  border-inline-start-color: var(--mbgc-native-accent) !important;
+  color: var(--mbgc-native-ink) !important;
+  font-weight: 700;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="menu"] [data-mbgc-nav-row] > :is(.mbgc-glyph,.mbgc-nav-label,.menu-label,.nav-label),
+html[data-mbgc-native-dark] [data-mbgc-audit-classes] a > :is(.menu-label,.nav-label) {
+  color: inherit !important;
+  font-weight: inherit;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-classes] a:not([data-mbgc-nav-native]) {
+  border-inline-start: 2px solid transparent;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-classes] [data-mbgc-audit-selected]:not([data-mbgc-nav-native]) {
+  box-shadow: none;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-classes] a > .mbgc-sidebar-grade {
+  background: var(--mbgc-native-secondary);
+  border-color: var(--mbgc-native-border);
+  color: var(--mbgc-native-text);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-classes] [data-mbgc-audit-selected] > .mbgc-sidebar-grade {
+  background: var(--mbgc-native-selection);
+  color: var(--mbgc-native-ink);
+}
+
+/* Directory row variants share a surface even when a later batch is rendered differently. */
+html[data-mbgc-native-dark] [data-mbgc-audit-page="groups"] :is(.group-row,.group-card,.group-list-item,[data-group-id],[role="listitem"],[data-mbgc-audit-part="group-row"])
+  :where(:not(img,svg,.badge,.badge *,[data-role="avatar"],[data-role="avatar"] *,.avatar,.avatar *,.btn,.btn *)) {
+  border-color: var(--mbgc-native-border);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page="groups"] :is(.group-row,.group-card,.group-list-item,[data-group-id],[role="listitem"],[data-mbgc-audit-part="group-row"]):not(.mbgc-owned,.mbgc-owned *) {
+  background-color: var(--mbgc-native-surface) !important;
+  color: var(--mbgc-native-text);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page="groups"] :is(.group-name,.member-count,.group-description,.group-title) {
+  color: var(--mbgc-native-text) !important;
+}
+
+/* Interactive states on the audited native controls. Their layout remains native. */
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="activity-more"],:where([data-mbgc-audit-page],.modal-content,[role="dialog"],.dropdown-menu) :is(.btn-light,.btn-outline-secondary,.fc-button,.calendar-toolbar button,.timetable-toolbar button,.pagination :is(a,button,.page-link))):not(.mbgc-owned,.mbgc-owned *) {
+  background-color: var(--mbgc-native-control) !important;
+  border-color: var(--mbgc-native-border);
+  color: var(--mbgc-native-text) !important;
+}
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="activity-more"],:where([data-mbgc-audit-page],.modal-content,[role="dialog"],.dropdown-menu) :is(.btn-light,.btn-outline-secondary,.fc-button,.calendar-toolbar button,.timetable-toolbar button,.pagination :is(a,button,.page-link))):hover:not(:disabled,[aria-disabled="true"],.disabled *) {
+  background-color: var(--mbgc-native-hover) !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page] :is(.pagination [aria-current="page"],.pagination .active > .page-link,.fc-button-active,.calendar-toolbar [aria-pressed="true"],.timetable-toolbar [aria-pressed="true"]) {
+  background-color: var(--mbgc-native-selection) !important;
+  color: var(--mbgc-native-ink) !important;
+  border-color: var(--mbgc-native-accent);
+}
+html[data-mbgc-native-dark] :is([data-mbgc-audit-page],[data-mbgc-audit-part="menu"],.modal-content,[role="dialog"],.dropdown-menu) :is(button,a,select,input,[role="button"]):focus-visible:not(.mbgc-owned,.mbgc-owned *) {
+  outline: 2px solid var(--mbgc-native-focus);
+  outline-offset: 2px;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page] :is(button,a,select,input,[role="button"]):is(:disabled,[aria-disabled="true"],.disabled *):not(.mbgc-owned,.mbgc-owned *) {
+  color: var(--mbgc-native-disabled) !important;
+  opacity: .85;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page] :is(.empty-state,[data-empty-state],.tooltip-inner) {
+  color: var(--mbgc-native-text);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page="personalisation"] :is(.alert-info,.guidance-banner,[data-guidance]) {
+  background-color: var(--mbgc-native-secondary) !important;
+  color: var(--mbgc-native-info) !important;
+  border-color: var(--mbgc-native-border);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-page="personalisation"] :is(.alert-info,.guidance-banner,[data-guidance]) :is(p,span,strong) {
+  color: inherit !important;
+}

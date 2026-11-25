@@ -19,6 +19,10 @@ Click the GradeLens icon to open the toolbar popup. From a signed-in student tab
 
 The popup also controls the master switch, individual placement and navigation toggles, and appearance. Appearance controls are available in Overall Grades settings and on a recognized ManageBac Personalisation page. **Follow System**, **Light**, and **Dark** share one saved setting. An older **Match ManageBac** preference now follows the system. Appearance and the native accent are independent. The extension uses the exact five supplied ManageBac palette pairs for accents and light selected surfaces, with contrast-adjusted foregrounds when required. Dark mode covers recognized native containers, forms, menus, task surfaces, Bootstrap tables, FullCalendar, and Highcharts labels. GradeLens pairs native page surfaces with readable text in dark mode. Within student content, a bounded observer also recovers neutral light fills on unfamiliar large wrappers. Artwork, semantic badges, and colored calendar events retain their own styling. Unknown gradients, embedded documents, and chart graphics can keep their native appearance. Workspace navigation uses a shared row layout with bold selected labels. ManageBac Reimagined controls the native page while its theme is active. Refresh the site once after installing an extension update. Saved changes subsequently apply to open tabs. Reload the unpacked extension in place to keep its existing cache and preferences.
 
+## Native dark-mode component coverage
+
+Notification tables, timetable lessons, calendar events and weekends, workspace and classes flyouts, group directory rows, and class activity controls use component-specific styles in dark mode. GradeLens pairs readable text with timetable and event colors and keeps native attendance badges and artwork. Embedded pages, school-specific component markup, and charts outside the supported selectors may still use their native appearance.
+
 ## Grades and what-if scenarios
 
 - Expand a subject to search assessment titles and categories. Search only changes which rows are shown. Assessment links with a verified ManageBac task destination open in a new tab.

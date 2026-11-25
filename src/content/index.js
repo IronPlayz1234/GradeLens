@@ -103,12 +103,13 @@
     stageHost.remove();
   }
 
+  const nativeNavScope = 'aside,nav,[role="navigation"],[role="menu"],.sidebar,.sidebar-flyout,.navigation-flyout,.sidebar-menu,.flyout';
   function getWorkspaceAnchor() {
     return [...document.querySelectorAll('a[href]:not(.mbgc-nav)')].find((node) => {
       const url = app.localURL(node.getAttribute('href'), location.href);
       const label = app.clean(node.getAttribute('aria-label') || node.getAttribute('title') || node.textContent);
       return url?.pathname.replace(/\/$/, '') === app.workspacePath &&
-        (node.closest('aside, nav, [role="navigation"], .sidebar') ||
+        (node.closest(nativeNavScope) ||
           /^tasks\s*(?:&|and)\s*deadlines$/i.test(label)) &&
         !url.search;
     }) ?? null;
@@ -143,7 +144,7 @@
   }
 
   function updateNativeIcons(anchor) {
-    const scope = anchor?.closest('aside,.sidebar,nav,[role="navigation"]');
+    const scope = anchor?.closest(nativeNavScope);
     const current = new Set();
     for (const link of scope?.querySelectorAll('a[href]:not(.mbgc-nav)') ?? []) {
       const label = app.clean(link.getAttribute('aria-label') || app.clean(link.textContent) || link.title);
@@ -222,13 +223,13 @@
   }
 
   function updateClassBadges() {
-    const scope = ':is(aside,nav,[role="navigation"],.sidebar)';
+    const scope = ':is(' + nativeNavScope + ')';
     for (const link of document.querySelectorAll(scope + ' a[href*="/student/classes/"], a:has(> .mbgc-sidebar-grade)')) {
       const badge = link.querySelector(':scope > .mbgc-sidebar-grade');
       const url = app.localURL(link.getAttribute('href'), location.href);
       const route = url && app.route(url);
       const enrolledLink = (route?.type === 'overview' || route?.type === 'tasks') && link.closest(scope) &&
-        (!link.closest(mainSelector) || link.closest('aside,.sidebar'));
+        (!link.closest(mainSelector) || link.closest('aside,.sidebar,[role="menu"],.sidebar-flyout,.navigation-flyout,.sidebar-menu'));
       const entry = sync.settings.showBadges && enrolledLink && sync.cache.classes[route.classId];
       const nativeTerm = url && app.termFromURL(url)?.id;
       const term = nativeTerm ? 'term:' + nativeTerm :
@@ -348,7 +349,7 @@
   }
 
   function syncNavigationSelection(panel) {
-    const scope = nativeAnchor?.closest('aside,.sidebar') ?? nativeAnchor?.closest('nav,[role="navigation"]');
+    const scope = nativeAnchor?.closest('aside,.sidebar,.sidebar-flyout,.navigation-flyout,.sidebar-menu') ?? nativeAnchor?.closest(nativeNavScope);
     const current = new URL(location.href);
     const sameRoute = (link) => {
       const url = app.localURL(link.getAttribute('href'), current);
@@ -406,6 +407,7 @@
     }
     app.bindNativeSurfaces();
     installNav();
+    app.bindNativeComponents(nativeAnchor);
     updateNativeIcons(nativeAnchor);
     for (const root of [stage, card]) {
       for (const key of ['density', 'motion', 'progressBars']) {
@@ -568,6 +570,7 @@
 
   function handleMutations(records) {
     if (!sync.settings.enabled) return;
+    app.observeNativeComponents(records);
     if (location.href !== lastURL) { reconcile(); return; }
     const scores = new Set();
     for (const entry of records) {

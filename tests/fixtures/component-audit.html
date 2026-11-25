@@ -1,0 +1,80 @@
+<!doctype html>
+<html data-theme="plum">
+<head><meta charset="utf-8"><title>Native student component audit</title>
+<style>
+* { box-sizing:border-box }
+body { margin:0; font:15px/1.45 system-ui; color:#172132; background:#f2f4f7 }
+header.site { display:flex; justify-content:space-between; padding:14px 22px; background:white; border-bottom:1px solid #d3dae3 }
+.navigation-rail { position:absolute; inset:50px auto 0 0; width:52px; background:#fff; display:grid; align-content:start; gap:12px; padding:7px }
+.navigation-rail a { text-align:center; padding:6px }
+.shell { display:grid; grid-template-columns:240px minmax(0,1fr); margin-left:52px; min-height:calc(100vh - 50px) }
+.workspace-region { padding:16px 12px }
+.flyout { border:1px solid #cfd7e0; border-radius:9px; background:white; padding:9px; margin-bottom:12px }
+.flyout h3 { margin:0 0 5px; border-radius:5px; padding:6px; background:#fafafa; color:#43516a }
+.flyout ul { list-style:none; margin:0; padding:0 }
+.flyout a { color:#24334a; text-decoration:none; display:block; padding:6px; border-radius:6px }
+.flyout a:hover:not(.mbgc-nav) { background:#f9f5f9; color:#e1e5ed }
+.flyout .menu-label { font-weight:400 }
+main { padding:22px 26px }
+h1 { font-size:24px; margin:0 0 12px }
+h2 { font-size:17px }
+.panel { background:white; border:1px solid #d0d8e3; border-radius:9px; padding:12px; margin-bottom:12px }
+table { border-collapse:collapse; width:100%; table-layout:fixed }
+th,td { border:1px solid #d0d8e3; padding:9px; text-align:left }
+.table-striped tbody tr:nth-child(odd) td { box-shadow:inset 0 0 0 999px #f7f8fa }
+.notification-section-title,.notification-title,.timetable-day { color:#41516a }
+.notification-description,.room,.lesson-name { color:#40516a; display:block }
+.account-menu .profile-subtitle { display:block; color:#43516a }
+.fc-event time { display:block }
+.lesson-card,.fc-event { padding:8px; display:block; border:1px solid #bdc9d7; border-radius:7px; min-height:52px }
+html[data-mbgc-native-dark] .lesson-card .lesson-name,
+html[data-mbgc-native-dark] .notification-description,
+html[data-mbgc-native-dark] .fc-daygrid-day-number { color:#e6edf5 }
+.lesson-card .badge { float:right; padding:2px 6px; border-radius:4px; background:#087125; color:#fff }
+.calendar-toolbar,.timetable-toolbar,.pagination { display:flex; gap:6px; margin:8px 0 }
+.fc-daygrid-day { vertical-align:top; height:115px }
+.fc-daygrid-day-number { color:#18253a }
+.fc-event { margin-top:8px; border-inline-start:3px solid #83a121; text-decoration:none }
+.group-row,[data-group-id] { display:grid; grid-template-columns:1fr auto; align-items:center; gap:12px; padding:12px; margin:8px 0; border:1px solid #ced6e0; border-radius:8px }
+.group-row .avatar { color:white; background:#67778c; border-radius:100px; padding:4px 8px }
+button,.page-link { border:1px solid #b6c1cf; border-radius:6px; background:#fff; color:#43516a; padding:5px 10px; font:inherit; text-decoration:none }
+.show-more { width:100%; margin-top:8px }
+.guidance-banner { padding:10px; border:1px solid #1470ef; border-radius:8px; background:#eff8ff; color:#173a71 }
+.guidance-banner p { margin:2px 0 }
+.dropdown-menu,.modal-content { border:1px solid #cfd7e0; border-radius:8px; padding:9px }
+.dropdown-menu a { display:block; padding:5px; text-decoration:none }
+.account-menu { display:none; position:absolute; right:18px; top:49px; background:white }
+.account-menu[data-open] { display:block }
+.modal-content { margin-top:9px }
+input[type=search] { padding:5px; margin-bottom:8px }
+@media(max-width:760px){ .shell { grid-template-columns:185px minmax(0,1fr) } main { padding-inline:12px } }
+</style>
+</head>
+<body>
+<header class="site"><strong>ManageBac Student Workspace</strong><a href="/student/profile/9">Manage Your Profile</a></header>
+<nav class="navigation-rail" aria-label="Site modules">
+  <a href="/student" aria-label="Workspace">▦</a><a href="/student/classes" aria-label="Classes">▤</a><a href="/student/groups" aria-label="Groups">◇</a>
+</nav>
+<div class="shell">
+<div class="workspace-region">
+  <nav class="flyout" aria-label="My Workspace">
+    <h3>My Workspace</h3><ul>
+      <li><a href="/student">My Workspace</a></li>
+      <li><a href="/student/calendar">Calendar</a></li>
+      <li><a href="/student/timetables">Timetables</a></li>
+      <li><a href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a></li>
+    </ul>
+  </nav>
+  <aside class="flyout classes-flyout"><h3>Classes</h3>
+    <a href="/student/classes/123"><span class="menu-label">Physics</span></a>
+    <a href="/student/classes/456"><span class="menu-label">Mathematics</span></a>
+  </aside>
+  <aside class="flyout groups-flyout"><h3>Groups</h3>
+    <a href="/student/groups/22">Student council</a><a href="/student/groups">Browse All Groups</a>
+  </aside>
+</div>
+<main id="content">__CONTENT__</main>
+</div>
+<div class="dropdown-menu account-menu"><a href="/student/profile/9"><strong>Student</strong><span class="profile-subtitle">Manage Your Profile</span></a><a href="/student/notification_preferences">Notification Preferences</a></div>
+</body>
+</html>
