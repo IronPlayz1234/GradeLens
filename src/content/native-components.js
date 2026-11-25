@@ -13,13 +13,16 @@
   const specialPaint = '.badge,.avatar,[data-role="avatar"],.status,[data-status],[data-category-color],img,svg';
   const navigationTitle = /^(My Workspace|Workspace|Classes|Groups)(?:\s*[WCG])?$/i;
   const memberLink = 'a[href*="/student/groups/"],a[href*="/student/ib-groups/"]';
+  const guidance = '.alert-info,.guidance-banner,[data-guidance],[role="alert"],[role="status"]';
+  const activityRow = '.activity-item,.activity-entry,[data-activity-item],[data-activity-entry]';
+  const activityLink = 'a[href*="/core_tasks/"],a[href*="/tasks/"],a[href*="/messages/"]';
   const groupRow = 'article,li,[role="listitem"],[data-group-id],.group-row,.group-card,.group-list-item';
   const headings = 'h1,h2,h3,h4,[role="heading"],.page-title,.menu-title,.dropdown-header';
   const menuHeadings = headings + ',.menu-heading,.menu-header,.sidebar-header,.flyout-header';
   const mainSelector = 'main,[role="main"],#main-content,#content,.main-content';
   const menus = 'nav,aside,[role="navigation"],[role="menu"],.sidebar,.dropdown-menu,[data-sidebar],.sidebar-flyout,.navigation-flyout,.sidebar-menu,.flyout,.main-sidebar,.navigation-rail,.side-navigation,[data-navigation-rail]';
   const scheduleSelector = menus + ',' + headings + ',table,[role="table"],[role="grid"],[role="row"],' +
-    '.fc,.lesson-card,.timetable-card,.calendar-event,.group-card,.group-row,section,article,a,button';
+    '.fc,.lesson-card,.timetable-card,.calendar-event,.group-card,.group-row,section,article,a,button,' + guidance + ',' + activityRow;
   const tagged = new Set();
   let queued = false;
   let route;
@@ -193,7 +196,35 @@
     }
   }
 
+  function inspectGuidance(main) {
+    for (const banner of main.querySelectorAll(guidance)) {
+      if (banner.matches('.alert-info,.guidance-banner,[data-guidance]') ||
+          [...banner.querySelectorAll('strong,b,' + headings)].some((node) => /^Guidance$/i.test(app.clean(node.textContent)))) {
+        mark(banner, part, 'guidance');
+      }
+    }
+  }
+
   function inspectActivity(main) {
+    for (const row of main.querySelectorAll(activityRow)) mark(row, part, 'activity-row');
+    const feeds = new Set(main.querySelectorAll('[data-activity-feed],.activity-feed,.latest-activity,#latest-activity'));
+    for (const heading of main.querySelectorAll(headings)) {
+      if (!/^Latest Activity$/i.test(app.clean(heading.textContent))) continue;
+      const surrounding = heading.closest('section,[role="region"],.panel,.card') ?? heading.parentElement;
+      if (surrounding !== main) feeds.add(surrounding);
+    }
+    for (const feed of feeds) {
+      for (const link of [...feed.querySelectorAll(activityLink)].slice(0, 180)) {
+        let row = link.parentElement;
+        for (let level = 0; row && row !== feed && level < 5; level++, row = row.parentElement) {
+          if (row.querySelectorAll(activityLink).length !== 1) break;
+          if (!row.matches('article,li,[role="listitem"]') &&
+              !(row.querySelector('time,[datetime]') && (hasPaleFill(row) || row.parentElement?.children.length > 1))) continue;
+          mark(row, part, 'activity-row');
+          break;
+        }
+      }
+    }
     for (const action of [...main.querySelectorAll('button,a[href],[role="button"]')].slice(0, 250)) {
       if (!action.matches('.show-more,.load-more,[data-load-more]') &&
           !/^Show More$/i.test(app.clean(action.textContent))) continue;
@@ -225,7 +256,8 @@
         }
       }
       if (kind === 'groups') inspectDirectory(main);
-      if (kind === 'overview') inspectActivity(main);
+      inspectGuidance(main);
+      inspectActivity(main);
     }
     inspectMenus(main);
   }

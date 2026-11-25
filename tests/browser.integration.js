@@ -1705,7 +1705,7 @@ test('computed dark mode repairs unfamiliar and dynamically inserted native pain
       .cold-ink { color: rgb(22, 29, 40) !important; }
       .pending-paint { background: rgb(237, 243, 246); }
       .pending-dark { background: rgb(9, 13, 18); color: white; }
-      .pressable { background-color: #fff; color: #151e2a; border: 0; padding: 4px 8px; }
+      .pressable { background-color: #fff; color: #151e2a; border: 0; padding: 4px 8px; transition: background-color .18s, color .18s; }
       .pressable:hover { background-color: #132440; color: #f3f4f7; }
       #banner { background: linear-gradient(90deg, #ffb85c, #ffd19d); color: #251e17; width: 180px }
     </style></head><body>
@@ -1778,16 +1778,105 @@ test('computed dark mode repairs unfamiliar and dynamically inserted native pain
     await portal.and(page.locator('[data-mbgc-neutral-surface]')).waitFor();
     assert.equal(await background(portal), 'rgb(29, 35, 44)');
 
+    // Exercise repeated changes and movement between a row and its children
+    // while the native styles would normally transition between light and dark.
+    await apply.evaluate((node) => {
+      window.__hoverPaint = [];
+      const record = () => {
+        if (!window.__hoverPaint) return;
+        window.__hoverPaint.push(getComputedStyle(node).backgroundColor);
+        requestAnimationFrame(record);
+      };
+      requestAnimationFrame(record);
+    });
+    for (let repeat = 0; repeat < 3; repeat++) {
+      await apply.hover();
+      await apply.and(page.locator(':not([data-mbgc-neutral-surface])')).waitFor();
+      assert.equal(await background(apply), 'rgb(19, 36, 64)');
+      await page.mouse.move(8, 8);
+      await apply.and(page.locator('[data-mbgc-neutral-surface]')).waitFor();
+      assert.ok(await contrast(apply) >= 4.5);
+    }
+
+    const hoverPaint = await page.evaluate(() => {
+      const samples = window.__hoverPaint;
+      delete window.__hoverPaint;
+      return samples;
+    });
+    assert.ok(hoverPaint.length >= 3);
+    assert.ok(hoverPaint.every((value) => value.match(/[0-9]+/g).slice(0, 3)
+      .every((channel) => Number(channel) < 100)), hoverPaint.join(', '));
+
+    await page.evaluate(() => {
+      const main = document.querySelector('main');
+      main.insertAdjacentHTML('beforeend', `
+        <div role="alert" style="background:#eff8ff!important;color:#e5edf7!important;padding:12px">
+          <strong>Guidance</strong><p>Open your workspace to see recent activity.</p>
+          <button aria-label="Dismiss guidance" onclick="this.closest('[role=alert]').remove()">Close</button>
+        </div>
+        <section aria-label="Repeated banner example" class="summary-pattern">
+          <div style="height:110px;background:#f7faff url('/theme/664d930ad.png') repeat-x">No items to show</div>
+        </section>
+        <section aria-label="Reflections">
+          <h2>Reflections</h2>
+          <div style="height:135px;background:#f7faff url('/theme/664d930ad.png') repeat-x">No reflections to show</div>
+        </section>
+        <div class="empty-state">
+          <div style="height:65px;background:#fff url('/theme/empty-state-background.png') repeat">No results</div>
+        </div>
+        <div aria-label="Course artwork" style="height:65px;background:#3a5367 url('/theme/class-banner.png') no-repeat"></div>
+        <section id="latest-activity">
+          <h2>Latest Activity</h2>
+          <article style="background:linear-gradient(#fff,#fafafa);padding:12px">
+            <a href="/student/classes/123/core_tasks/45">Chapter 8 notes</a>
+            <time datetime="2026-11-24">Monday at 1:30 PM</time>
+            <span class="badge" style="background:#79d58c;color:#102816">Pending</span>
+          </article>
+        </section>`);
+    });
+    const guidance = page.getByRole('alert');
+    await guidance.and(page.locator('[data-mbgc-audit-part="guidance"]')).waitFor();
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('[role="alert"]')).backgroundColor !== 'rgb(239, 248, 255)');
+    assert.ok(await contrast(guidance) >= 4.5);
+    const row = page.locator('#latest-activity article');
+    await row.and(page.locator('[data-mbgc-audit-part="activity-row"]')).waitFor();
+    await row.and(page.locator('[data-mbgc-flat-gradient]')).waitFor();
+    assert.equal(await color(row, 'backgroundImage'), 'none');
+    await row.getByRole('link').hover();
+    assert.notEqual(await background(row), 'rgb(255, 255, 255)');
+    assert.equal(await background(row.getByText('Pending')), 'rgb(121, 213, 140)');
+    await page.mouse.move(8, 8);
+    assert.notEqual(await background(row), 'rgb(255, 255, 255)');
+
+    const patterns = page.locator('[data-mbgc-native-doodle]');
+    await patterns.nth(2).waitFor();
+    assert.equal(await patterns.count(), 3);
+    assert.match(await color(patterns.first(), 'backgroundImage'), /chrome-extension:.*school-doodles-dark\.webp/);
+    assert.match(await color(page.locator('[aria-label="Course artwork"]'), 'backgroundImage'), /class-banner\.png/);
+    assert.equal(await patterns.first().evaluate(async (node) => {
+      const url = getComputedStyle(node).backgroundImage.slice(5, -2);
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      return image.naturalWidth;
+    }), 640);
+
     const screenshots = process.env.MBGC_AUDIT_SCREENSHOTS;
-    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'computed-native-dark.png') });
+    if (screenshots) {
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.screenshot({ path: path.join(screenshots, 'computed-native-dark.png'), fullPage: true });
+    }
     await mode('light');
     await page.locator('html[data-mbgc-native-dark]').waitFor({ state: 'detached' });
     await button.and(page.locator('[data-mbgc-paint-ink]')).waitFor({ state: 'detached' });
     assert.equal(await background(button), 'rgb(255, 255, 255)');
     assert.equal(await color(button, 'color'), 'rgb(21, 32, 48)');
     assert.equal(await background(portal), 'rgb(255, 255, 255)');
+    await patterns.first().waitFor({ state: 'detached' });
+    assert.match(await color(page.locator('.summary-pattern > div'), 'backgroundImage'), /664d930ad\.png/);
+    assert.equal(await background(guidance), 'rgb(239, 248, 255)');
     await page.locator('.mbgc-nav[data-theme="light"]').first().waitFor();
-    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'computed-native-light.png') });
+    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'computed-native-light.png'), fullPage: true });
   } finally {
     await browser.close();
     await fs.rm(profile, { recursive: true, force: true });

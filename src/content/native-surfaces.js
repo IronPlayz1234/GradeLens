@@ -5,6 +5,9 @@
   const dark = 'data-mbgc-native-dark';
   const fill = 'data-mbgc-neutral-surface';
   const ink = 'data-mbgc-paint-ink';
+  const reading = 'data-mbgc-paint-reading';
+  const doodle = 'data-mbgc-native-doodle';
+  const doodleImage = '--mbgc-native-doodle-image';
   const ignored = [
     '.mbgc-owned', '.mbr-ui', '.badge', '[data-status]', '[data-category-color]',
     '[data-event-color]', '[data-banner-artwork]', '.banner-artwork', '[role="img"]',
@@ -14,6 +17,9 @@
   const widget = 'a[href],summary,[role="menuitem"],' + control;
   const queue = new Map();
   const marked = new Set();
+  const doodleSources = new Set();
+  const doodleHosts = '[data-empty-state],[data-empty-state-pattern],[data-no-data],.empty-state,.no-data,.empty-placeholder,[class*="emptyState"]';
+  const doodlePath = /(?:^|[\/_.-])(?:doodles?|(?:empty[-_]?state|no[-_]?data)[-_]?(?:pattern|bg|background|banner)|(?:pattern|background)[-_]empty)(?=[\/_.-]|$)/i;
   let frame = 0;
   let walk;
   let active = false;
@@ -75,53 +81,102 @@
   const paintsText = (node) => node.matches(widget) ||
     Array.prototype.some.call(node.childNodes, (child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim());
 
+  function isDoodle(node, style) {
+    const layer = /^url\((?:"([^"]+)"|'([^']+)'|([^()]+))\)$/.exec(style.backgroundImage);
+    if (!layer) return false;
+    const url = URL.parse(layer[1] ?? layer[2] ?? layer[3], location.href);
+    if (!url || !/^https?:$/.test(url.protocol)) return false;
+    const source = url.origin + url.pathname;
+    if (doodleSources.has(source) || doodlePath.test(url.pathname) || node.matches('[data-empty-state-pattern]')) return true;
+    // The Reflections panel and other empty states can ship with an opaque
+    // asset filename. Recognize their repeating backdrop by its placement.
+    const repeats = /^(?:repeat-x|repeat(?: repeat| no-repeat)?)$/.test(style.backgroundRepeat);
+    if (!repeats || node.clientWidth < 240 || node.clientHeight < 48 || node.clientHeight > 450) return false;
+    const empty = node.closest(doodleHosts);
+    const reflection = !empty && node.closest('section,[role="region"],.panel,.card,[data-reflections]');
+    const title = reflection?.querySelector('h1,h2,h3,h4,[role="heading"]');
+    if (!empty && title?.textContent.trim() !== 'Reflections' && !reflection?.matches('[data-reflections]')) return false;
+    if (doodleSources.size < 24) {
+      doodleSources.add(source);
+      pageChanged();
+    }
+    return true;
+  }
+
+  function simplePaleGradient(value) {
+    if (!/^linear-gradient\(/.test(value)) return false;
+    const paints = value.match(/rgba?\([^)]+\)/g)?.map(rgba);
+    if (!paints?.length || paints.some((paint) => !paint || paint[3] < .9 || luminance(paint) < .72)) return false;
+    const channels = paints.flatMap((paint) => paint.slice(0, 3));
+    return Math.max(...channels) - Math.min(...channels) < 32;
+  }
+
   function clearPaint(node) {
     if (!marked.delete(node)) return;
     node.removeAttribute(fill);
     node.removeAttribute(ink);
+    node.removeAttribute(doodle);
+    node.removeAttribute('data-mbgc-flat-gradient');
   }
 
   function sampleBatch(nodes) {
     // Temporarily lift our values on the nodes being reevaluated. Read first,
     // then commit the entire batch before the browser paints.
-    for (const node of nodes) clearPaint(node);
+    const candidates = [...nodes].filter((node) => node.isConnected && !node.closest(ignored));
+    if (!candidates.length) return;
+    // A transition can otherwise report the old, already dark interpolated
+    // color when we lift our override, causing the next paint to go white.
+    for (const node of candidates) {
+      node.setAttribute(reading, '');
+      clearPaint(node);
+    }
     const theme = getComputedStyle(root);
     const token = (name) => rgba(theme.getPropertyValue('--mbgc-native-' + name).trim());
     const palette = {
       page: token('bg'), surface: token('surface'), raised: token('secondary'), control: token('control'),
       light: token('text') ?? [255, 255, 255], dark: [0, 0, 0]
     };
-    if (!palette.page || !palette.surface || !palette.raised || !palette.control) return;
+    if (!palette.page || !palette.surface || !palette.raised || !palette.control) {
+      for (const node of candidates) node.removeAttribute(reading);
+      return;
+    }
     const changes = new Map();
     const sampled = new WeakMap();
     function sample(node) {
       if (!node || node === root) return { surface: palette.page };
       if (sampled.has(node)) return sampled.get(node);
       const style = getComputedStyle(node);
-      const background = rgba(style.backgroundColor);
-      // Image and gradient paint can't be inferred from background-color.
-      const flat = style.backgroundImage === 'none';
+      const pattern = node.hasAttribute(doodle) || isDoodle(node, style);
+      const flatGradient = !pattern && simplePaleGradient(style.backgroundImage);
+      const flat = style.backgroundImage === 'none' || flatGradient;
+      const background = flatGradient ? [245, 247, 250, 1] : rgba(style.backgroundColor);
       const replacement = flat && background && darken(node, background, palette);
-      let surface = null;
+      let surface = pattern ? palette.surface : null;
       if (flat && background) {
         const paint = replacement || background;
         surface = paint[3] === 1 ? paint : composite(paint, sample(node.parentElement).surface);
       }
-      const result = { fill: replacement, surface, color: style.color };
+      const result = { fill: replacement, surface, color: style.color, pattern, flatGradient };
       sampled.set(node, result);
       return result;
     }
-    for (const node of nodes) {
-      if (!node.isConnected || node.closest(ignored)) continue;
+    for (const node of candidates) {
       const colors = sample(node);
       const text = paintsText(node) && readable(rgba(colors.color), colors.surface, palette);
-      if (colors.fill || text) changes.set(node, [colors.fill, text]);
+      if (colors.fill || text || colors.pattern) changes.set(node, [colors, text]);
     }
-    for (const [node, [background, text]] of changes) {
-      if (background) node.setAttribute(fill, css(background));
+    for (const [node, [colors, text]] of changes) {
+      if (colors.fill) node.setAttribute(fill, css(colors.fill));
       if (text) node.setAttribute(ink, css(text));
+      if (colors.pattern) node.setAttribute(doodle, '');
+      if (colors.flatGradient) node.setAttribute('data-mbgc-flat-gradient', '');
       marked.add(node);
     }
+    // Commit the final dark paint with transitions still disabled, so restoring
+    // the site's transition rules doesn't interpolate from the sampled color.
+    getComputedStyle(candidates[0]).backgroundColor;
+    for (const node of candidates) node.removeAttribute(reading);
+
   }
 
   function advance() {
@@ -155,7 +210,7 @@
       batch.add(node);
     }
     if (batch.size) sampleBatch(batch);
-    if (walk || queue.size) frame = requestAnimationFrame(flush);
+    if ((walk || queue.size) && !frame) frame = requestAnimationFrame(flush);
   }
 
   function schedule(node, deep = true) {
@@ -195,6 +250,10 @@
     if (enabled === active) return;
     active = enabled;
     if (active) {
+      try {
+        const asset = chrome.runtime.getURL('assets/patterns/school-doodles-dark.webp');
+        root.style.setProperty(doodleImage, `url("${asset}")`);
+      } catch {}
       // A user-origin stylesheet reaches authored inline !important fills. The
       // manifest copy still applies if the worker is temporarily unavailable.
       if (!stylesheet) {
@@ -210,6 +269,7 @@
       pageChanged();
     } else {
       observer.disconnect();
+      root.style.removeProperty(doodleImage);
       if (frame) cancelAnimationFrame(frame);
       frame = 0;
       walk = null;
@@ -221,8 +281,11 @@
   // Hover/focus can change native CSS without a DOM mutation.
   const interaction = (event) => {
     if (!active || !(event.target instanceof Element)) return;
-    schedule(event.target, false);
-    schedule(event.target.closest(widget));
+    let node = event.target instanceof HTMLElement ? event.target : event.target.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < 8; depth++, node = node.parentElement) {
+      if (event.relatedTarget instanceof Node && node.contains(event.relatedTarget)) break;
+      schedule(node, depth === 0 || node.matches(widget + ',[data-mbgc-audit-part="activity-row"]'));
+    }
   };
   for (const event of ['pointerover', 'pointerout', 'focusin', 'focusout']) {
     document.addEventListener(event, interaction, true);

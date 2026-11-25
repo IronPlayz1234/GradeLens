@@ -8,3 +8,18 @@
     color: attr(data-mbgc-paint-ink type(<color>), var(--mbgc-native-text)) !important;
   }
 }
+
+/* Sampling is synchronous. Keep the site's normal motion outside that pass. */
+html[data-mbgc-native-dark] [data-mbgc-paint-reading] {
+  transition-property: none !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-flat-gradient] {
+  background-image: none !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-native-doodle] {
+  background-color: var(--mbgc-native-surface) !important;
+  background-image: var(--mbgc-native-doodle-image, none) !important;
+  background-position: center !important;
+  background-size: 430px 430px !important;
+  background-repeat: repeat !important;
+}

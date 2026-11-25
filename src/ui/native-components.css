@@ -161,11 +161,27 @@ html[data-mbgc-native-dark] [data-mbgc-audit-page] :is(button,a,select,input,[ro
 html[data-mbgc-native-dark] [data-mbgc-audit-page] :is(.empty-state,[data-empty-state],.tooltip-inner) {
   color: var(--mbgc-native-text);
 }
-html[data-mbgc-native-dark] [data-mbgc-audit-page="personalisation"] :is(.alert-info,.guidance-banner,[data-guidance]) {
+/* Native guidance can occur in different views, including asynchronously loaded panels. */
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="guidance"],.alert-info,.guidance-banner,[data-guidance]):where(:not(.mbgc-owned,.mbgc-owned *)) {
+  --bs-alert-bg: var(--mbgc-native-secondary);
+  --bs-alert-color: var(--mbgc-native-info);
   background-color: var(--mbgc-native-secondary) !important;
   color: var(--mbgc-native-info) !important;
   border-color: var(--mbgc-native-border);
 }
-html[data-mbgc-native-dark] [data-mbgc-audit-page="personalisation"] :is(.alert-info,.guidance-banner,[data-guidance]) :is(p,span,strong) {
-  color: inherit !important;
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="guidance"],.alert-info,.guidance-banner,[data-guidance]):where(:not(.mbgc-owned,.mbgc-owned *))
+  :is(p,span,strong,b,small,button,[role="button"],h2,h3):where(:not(.badge,.badge *)) {
+  color: var(--mbgc-native-info) !important;
+}
+
+html[data-mbgc-native-dark] [data-mbgc-audit-part="activity-row"] {
+  background-color: var(--mbgc-native-surface) !important;
+  color: var(--mbgc-native-text) !important;
+  border-color: var(--mbgc-native-border);
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="activity-row"]:is(:hover,:focus-within) {
+  background-color: var(--mbgc-native-hover) !important;
+}
+html[data-mbgc-native-dark] [data-mbgc-audit-part="activity-row"] :is(time,.activity-description,.activity-date,.activity-meta) {
+  color: var(--mbgc-native-secondary-text) !important;
 }
