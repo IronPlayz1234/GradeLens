@@ -108,5 +108,5 @@
     return '\uFEFF' + lines.join('\r\n') + '\r\n';
   }
 
-  Object.assign(app, { gradeInputs, estimate, compareMethods, gradeExport, gradeCSV, estimateNotice, gradeOverrides });
+  Object.assign(app, { gradeInputs, estimate, compareMethods, gradeExport, gradeCSV, csvCell, estimateNotice, gradeOverrides });
 })();

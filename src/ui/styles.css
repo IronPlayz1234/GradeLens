@@ -543,3 +543,60 @@ html a.mbgc-owned.mbgc-nav[data-theme="dark"][data-mbgc-nav-row]:where(:not([ari
 .mbgc-goal-breakdown ul { padding-inline-start: 20px; }
 .mbgc-goal-breakdown h4 { margin-block-start: 10px; }
 .mbgc-goal-announcement { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }
+
+.mbgc-history [role="img"] { display: block; width: 100%; height: 200px; }
+.mbgc-history-body { display: grid; min-width: 0; gap: 10px; padding: 7px 0 5px; }
+.mbgc-history-timeline {
+  max-block-size: 330px;
+  overflow: auto;
+  margin: 0;
+  padding: 0 4px 0 0;
+  list-style: none;
+  scrollbar-width: thin;
+}
+.mbgc-history-timeline > li {
+  padding: 7px 4px;
+  display: grid;
+  gap: 3px;
+  border-block-start: 1px solid var(--mbgc-border);
+  overflow-wrap: anywhere;
+}
+.mbgc-history-timeline time { font-size: 11px; color: var(--mbgc-muted); }
+.mbgc-history-timeline ul { padding-inline-start: 18px; }
+.mbgc-history-actions, .mbgc-header-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.mbgc-personalisation.mbgc-theme-choices {
+  margin-block: 20px;
+  color: inherit;
+  font: inherit;
+}
+.mbgc-theme-choices > h2 { font-size: 1.25em; font-weight: 650; margin-block-end: 9px; }
+.mbgc-appearance-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr));
+  gap: 10px;
+  max-inline-size: 680px;
+}
+.mbgc-owned .mbgc-appearance-option {
+  display: flex;
+  align-items: center;
+  min-block-size: 59px;
+  gap: 12px;
+  text-align: start;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--mbgc-native-border, var(--mbgc-border));
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.mbgc-owned .mbgc-appearance-option[aria-checked="true"] {
+  border-color: var(--mbgc-accent);
+  background: var(--mbgc-highlight);
+  color: var(--mbgc-ink);
+}
+.mbgc-owned .mbgc-appearance-option:where(:hover):not([aria-checked="true"]) {
+  background: var(--mbgc-tint);
+}
+.mbgc-appearance-symbol { display: inline-grid; place-items: center; width: 25px; font-size: 19px; }

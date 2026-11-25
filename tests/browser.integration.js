@@ -240,7 +240,7 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     await info.focus();
     await subject.getByRole('tooltip').getByText(/Some assignments may not have been included/).waitFor();
     await info.press('Escape');
-    await subject.locator('summary').click();
+    await subject.locator(':scope > summary').click();
     await subject.getByText(/could not confirm that the task list includes every assessment/).waitFor();
     await page.getByText('Sync details', { exact: true }).click();
     const { version } = JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8'));
@@ -411,7 +411,7 @@ test('automatically discovers enrolled classes, keeps PE consistent, and coalesc
     await peRow.getByText(/2 graded assessments/).waitFor();
     await grade('Mathematics', '67.50%');
     await row('Mathematics').getByText(/4 graded assessments/).waitFor();
-    await row('Visual Arts').locator('summary').click();
+    await row('Visual Arts').locator(':scope > summary').click();
     await row('Visual Arts').getByText(/No verifiable task scores in the returned HTML/).waitFor();
     await dashboard.getByLabel('Academic term').locator('option[value="term:812"]').waitFor({ state: 'attached' });
     assert.ok(requests.has('/student/classes?page=2'));
@@ -464,7 +464,7 @@ test('automatically discovers enrolled classes, keeps PE consistent, and coalesc
     await dashboard.getByText(/\d+ unchanged/).waitFor();
     await grade('Physical Education AS', '95.00%');
     await peRow.getByText(/2 graded assessments/).waitFor();
-    await peRow.locator('summary').click();
+    await peRow.locator(':scope > summary').click();
     await peRow.getByText(/No verifiable task scores in the returned HTML/).waitFor();
     await peRow.getByText(/Last successful sync/).waitFor();
     assert.deepEqual(requests.get(mathPath), [undefined, '"math-v1"']);
@@ -502,9 +502,9 @@ test('mixed subjects sync from the roster and distinguish no grade from a genuin
         await row(name).locator('.mbgc-numeral', { hasText: expected }).waitFor();
       }
     }
-    await row('Art').locator('summary').click();
+    await row('Art').locator(':scope > summary').click();
     await row('Art').getByText('Rubric only', { exact: true }).waitFor();
-    await row('English Literature').locator('summary').click();
+    await row('English Literature').locator(':scope > summary').click();
     await row('English Literature').getByText('A− (letter only)', { exact: true }).waitFor();
     const art = subjects.find(({ name }) => name === 'Art');
     await tab.goto(host + tasksPath(art));
@@ -585,7 +585,7 @@ test('render-only and linked results sync automatically and verified grades surv
     await row('Mathematics').locator('.mbgc-numeral', { hasText: '84.00%' }).waitFor();
     await row('Physics').locator('.mbgc-numeral', { hasText: '77.50%' }).waitFor();
     assert.equal(await row('Mathematics').locator('.mbgc-categories').count(), 0);
-    await row('Mathematics').locator('summary').click();
+    await row('Mathematics').locator(':scope > summary').click();
     await row('Mathematics').getByText(/Source: rendered student page/).waitFor();
     assert.equal(frameReads, 1);
     assert.equal(detailReads, 1);
@@ -628,7 +628,7 @@ test('render-only and linked results sync automatically and verified grades surv
     await tab.getByRole('button', { name: 'Refresh now' }).click();
     await tab.getByText('Sync details', { exact: true }).click();
     await tab.getByText(/pages could not be verified/i).waitFor();
-    await row('Mathematics').locator('summary').click();
+    await row('Mathematics').locator(':scope > summary').click();
     await row('Mathematics').getByText(/Cache · last read from rendered student page/).waitFor();
     await row('Mathematics').getByText(/Last successful sync/).waitFor();
   } finally {
@@ -811,7 +811,7 @@ test('assessment search, appearance and welcome work together', { timeout: 38000
     await tab.getByRole('button', { name: 'Refresh now' }).waitFor();
 
     const subject = tab.locator('.mbgc-subject').filter({ hasText: '74.50%' });
-    await subject.locator('summary').click();
+    await subject.locator(':scope > summary').click();
     const search = subject.getByRole('searchbox');
     await search.fill('   QUADrAtics    test ');
     await subject.getByText('1 matching assessment.').waitFor();
@@ -836,18 +836,18 @@ test('assessment search, appearance and welcome work together', { timeout: 38000
 
     await tab.locator('.mbgc-settings > summary').click();
     const priorReads = reads;
-    const height = await subject.locator('summary').evaluate((node) => node.offsetHeight);
+    const height = await subject.locator(':scope > summary').evaluate((node) => node.offsetHeight);
     await tab.getByLabel('Card density').selectOption('compact');
     await tab.locator('.mbgc-stage[data-density="compact"]').waitFor();
-    assert.ok(await subject.locator('summary').evaluate((node) => node.offsetHeight) < height);
+    assert.ok(await subject.locator(':scope > summary').evaluate((node) => node.offsetHeight) < height);
     await tab.getByLabel('Show grade progress bars').uncheck();
     await tab.locator('.mbgc-stage[data-progress-bars="false"]').waitFor();
     assert.equal(await subject.locator('.mbgc-row-method .mbgc-track').isVisible(), false);
     await tab.getByLabel('Animation intensity').selectOption('reduced');
     await tab.locator('.mbgc-stage[data-motion="reduced"]').waitFor();
-    assert.equal(await subject.locator('summary').evaluate((node) => getComputedStyle(node.closest('.mbgc-subject')).transitionDuration), '0.07s');
+    assert.equal(await subject.locator(':scope > summary').evaluate((node) => getComputedStyle(node.closest('.mbgc-subject')).transitionDuration), '0.07s');
     await tab.emulateMedia({ reducedMotion: 'reduce' });
-    assert.equal(await subject.locator('summary').evaluate((node) => getComputedStyle(node.closest('.mbgc-subject')).transitionDuration), '0s');
+    assert.equal(await subject.locator(':scope > summary').evaluate((node) => getComputedStyle(node.closest('.mbgc-subject')).transitionDuration), '0s');
     await tab.getByLabel('Animation intensity').selectOption('off');
     await tab.locator('.mbgc-stage[data-motion="off"]').waitFor();
     assert.equal(reads, priorReads);
@@ -2194,6 +2194,196 @@ test('compare, export and restore safely through the popup and Overall Grades', 
       await page.locator('.mbgc-compact').getByText('72.31%').waitFor();
       assert.equal((await currentStorage())[extra[2]][0].name, 'Exported goal');
     }
+  } finally {
+    await context?.close();
+    await fs.rm(folder, { recursive: true, force: true });
+  }
+});
+
+test('grade history tracks verified changes, separates calculation bases, and restores only for the same student', { timeout: 57000 }, async () => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-history-'));
+  const tasks = await fixture('class-tasks');
+  const hostPersonal = '/student/profile/personalisation';
+  let profileId = '9';
+  let points = '8';
+  let context;
+  async function open() {
+    context = await chromium.launchPersistentContext(folder, {
+      ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true, acceptDownloads: true,
+      args: ['--disable-extensions-except=' + root, '--load-extension=' + root], viewport: { width: 1080, height: 890 }
+    });
+    context.setDefaultTimeout(8500);
+    await context.route(host + '/**', (route) => {
+      const url = new URL(route.request().url());
+      let html = '<main><h1>Workspace</h1></main>';
+      if (url.pathname === tasksPath) {
+        html = tasks.replace('8 / 10 pts', points + ' / 10 pts');
+        if (url.searchParams.get('term_id') === '72') html = html.replace('value="71" selected', 'value="71"')
+          .replace('value="72">', 'value="72" selected>').replace('data-term-id="71"', 'data-term-id="72"');
+      }
+      if (url.pathname === hostPersonal) html = `<!doctype html><html data-theme="red"><head><meta charset="utf-8">
+        <style>body {font:16px system-ui;margin:0;padding:24px} html[data-mbgc-native-dark] [role=status],
+        html[data-mbgc-native-dark] [role=status] strong {color:#e3eaf3!important}</style></head><body>
+        <header><a href="/student/profile/9">Manage Your Profile</a></header>
+        <div role="status" style="background-color:#e9fcf2!important;color:#103627;padding:12px">
+        <strong>Success.</strong> Your changes have been successfully saved.
+        <button aria-label="Dismiss success" onclick="this.parentElement.remove()">×</button></div>
+        <main><h1>Personalisation</h1><section id="native-themes"><h2>Themes</h2>
+        <form><label><input type="radio" name="theme" value="blue">Blue</label>
+        <label><input type="radio" name="theme" value="red" checked>Red</label></form>
+        </section><section id="native-accessibility"><h2>Accessibility</h2></section></main></body></html>`;
+      if (!html.includes('Manage Your Profile')) html = '<header><a href="/student/profile/9">Manage Your Profile</a></header>' + html;
+      return route.fulfill({ body: html.replaceAll('/student/profile/9', '/student/profile/' + profileId), contentType: 'text/html' });
+    });
+    return context.serviceWorkers()[0] ?? context.waitForEvent('serviceworker');
+  }
+  const key = 'mbgc:history:uia.managebac.com:9';
+  const dialogFile = (json) => ({ name: 'history-backup.json', mimeType: 'application/json', buffer: Buffer.from(json) });
+  const classRow = (page) => page.locator('.mbgc-subject[data-class-id="123"]');
+  async function showHistory(page) {
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    await classRow(page).locator(':scope > summary').click();
+    const history = classRow(page).locator('.mbgc-history');
+    await history.locator('summary').click();
+    return history;
+  }
+  async function download(page, label, role = 'button') {
+    const pending = page.waitForEvent('download');
+    await page.getByRole(role, { name: label, exact: true }).click();
+    return fs.readFile(await (await pending).path(), 'utf8');
+  }
+  async function popupFor(worker) {
+    const popup = await context.newPage();
+    await popup.setViewportSize({ width: 400, height: 700 });
+    await popup.goto(worker.url().split('/src/')[0] + '/popup.html');
+    await popup.getByText('Export & Backup', { exact: true }).click();
+    return popup;
+  }
+  try {
+    let worker = await open();
+    await worker.evaluate(async () => {
+      await chrome.storage.local.set({ 'mbgc:preferences': { appearance: 'dark', welcomeSeen: true, refreshMinutes: 0 } });
+      await MBGC.refreshAppearancePrimer();
+    });
+    let page = await context.newPage();
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact').getByText('74.50%').waitFor();
+    let history = await showHistory(page);
+    await history.getByText('There are no recorded grades for this term.').waitFor();
+    const stored = () => worker.evaluate(async (key) => (await chrome.storage.local.get(key))[key], key);
+    assert.equal(await stored(), undefined);
+    const observedAfter = Date.now();
+    await history.getByRole('button', { name: 'Start tracking', exact: true }).click();
+    await history.getByText('Tracking baseline', { exact: true }).waitFor();
+    assert.ok((await stored()).terms['123:71'].events[0].at >= observedAfter);
+    assert.equal((await stored()).terms['123:71'].events[0].percentage, 74.5);
+
+    const second = await context.newPage();
+    await second.goto(host + tasksPath);
+    await second.locator('.mbgc-compact').getByText('74.50%').waitFor();
+    assert.equal((await stored()).terms['123:71'].events.length, 1);
+    points = '9';
+    await second.locator('#task-one .points').evaluate((node) => { node.textContent = '9 / 10 pts'; });
+    await history.getByText('Score or maximum changed', { exact: true }).waitFor();
+    await history.getByText(/76\.00%.*1\.5 pp/).waitFor();
+    await history.getByText('Networks short answer', { exact: true }).waitFor();
+    await history.locator('canvas[data-segments="1"][data-points="2"]').waitFor();
+    await second.reload();
+    await second.locator('.mbgc-compact').getByText('76.00%').waitFor();
+    assert.equal((await stored()).terms['123:71'].events.length, 2);
+    await classRow(page).getByLabel('Subject calculation method').selectOption('absolute');
+    await history.getByText('Calculation method changed', { exact: true }).waitFor();
+    await history.locator('canvas[data-segments="2"][data-points="3"]').waitFor();
+    assert.equal((await stored()).terms['123:71'].events.at(-1).delta, null);
+    if (process.env.MBGC_AUDIT_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.MBGC_AUDIT_SCREENSHOTS, 'history.png'), fullPage: true, animations: 'disabled' });
+    await second.close();
+
+    await page.getByText('Export', { exact: true }).click();
+    const quick = JSON.parse(await download(page, 'Download grade JSON'));
+    assert.equal(quick.format, 'gradelens-grades');
+    await page.goto(host + tasksPath + '?term_id=72');
+    await page.locator('.mbgc-compact').getByText(/Semester 2/).waitFor();
+    history = await showHistory(page);
+    await history.getByText('Tracking baseline', { exact: true }).waitFor();
+    assert.equal((await stored()).terms['123:72'].events.length, 1);
+    assert.equal((await stored()).terms['123:71'].events.length, 3);
+    await page.getByLabel('Academic term', { exact: true }).selectOption('term:71');
+    await history.locator('canvas[data-segments="2"][data-points="3"]').waitFor();
+
+    let popup = await popupFor(worker);
+    const csv = await download(popup, 'Export Grade History as CSV');
+    assert.match(csv, /corrected-grade/);
+    const archive = JSON.parse(await download(popup, 'Export Grade History as JSON'));
+    assert.equal(archive.format, 'gradelens-history');
+    assert.ok(!Object.hasOwn(archive, 'owner'));
+    assert.equal(archive.terms.find((term) => term.termId === '71').events.length, 3);
+    const simple = JSON.parse(await download(popup, 'Back Up Settings'));
+    assert.equal(simple.history, undefined);
+    await popup.getByLabel('Include grade history in backup').check();
+    const backup = await download(popup, 'Back Up Settings');
+    assert.equal(JSON.parse(backup).history.owner.length, 64);
+    await history.getByRole('button', { name: 'Clear subject history' }).click();
+    await history.getByRole('button', { name: 'Cancel clear' }).click();
+    assert.equal((await stored()).terms['123:71'].events.length, 3);
+    await history.getByRole('button', { name: 'Clear subject history' }).click();
+    await history.getByRole('button', { name: 'Confirm clear history' }).click();
+    await history.getByText('Grade tracking has started. Your history will appear here as new grades are recorded.').waitFor();
+    assert.deepEqual((await stored()).terms, {});
+    const picker = popup.getByLabel('Select GradeLens settings backup');
+    await picker.setInputFiles(dialogFile(backup));
+    await popup.getByText(/Merge 4 grade history observations/).waitFor();
+    await popup.getByRole('button', { name: 'Confirm restore' }).click();
+    await popup.getByText(/Settings restored/).waitFor();
+    await history.locator('canvas[data-segments="2"][data-points="3"]').waitFor();
+    await picker.setInputFiles(dialogFile(backup));
+    await popup.getByText(/Merge 0 grade history observations/).waitFor();
+    await popup.getByRole('button', { name: 'Cancel restore' }).click();
+
+    await context.close();
+    worker = await open();
+    page = await context.newPage();
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact').getByText('74.62%').waitFor();
+    history = await showHistory(page);
+    await history.getByText('Calculation method changed', { exact: true }).waitFor();
+    assert.equal((await stored()).terms['123:71'].events.length, 3);
+    await page.locator('.mbgc-settings > summary').click();
+    const settings = page.locator('.mbgc-settings');
+    await settings.getByRole('button', { name: 'Clear all history' }).click();
+    await settings.getByRole('button', { name: 'Confirm clear history' }).click();
+    await settings.getByRole('button', { name: 'Clear all history' }).waitFor({ state: 'detached' });
+    assert.deepEqual((await stored()).terms, {});
+
+    profileId = '10';
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact').getByText('74.62%').waitFor();
+    history = await showHistory(page);
+    await history.getByText('There are no recorded grades for this term.').waitFor();
+    popup = await popupFor(worker);
+    await popup.getByLabel('Select GradeLens settings backup').setInputFiles(dialogFile(backup));
+    await popup.getByText(/belongs to a different or unavailable student account/).waitFor();
+    await popup.getByRole('button', { name: 'Confirm restore' }).click();
+    await popup.getByText(/Settings restored/).waitFor();
+    assert.equal(await worker.evaluate(async () =>
+      (await chrome.storage.local.get('mbgc:history:uia.managebac.com:10'))['mbgc:history:uia.managebac.com:10']), undefined);
+
+    await page.goto(host + hostPersonal);
+    const choices = page.getByRole('radiogroup', { name: 'Appearance' });
+    await choices.getByRole('radio', { name: 'Dark', exact: true }).and(page.locator('[aria-checked="true"]')).waitFor();
+    assert.equal(await choices.evaluate((node) => node.closest('section').previousElementSibling.id), 'native-themes');
+    assert.equal(await choices.evaluate((node) => node.closest('section').nextElementSibling.id), 'native-accessibility');
+    const banner = page.getByRole('status', { name: '' }).filter({ hasText: 'Your changes have been successfully saved.' });
+    await banner.and(page.locator('[data-mbgc-audit-part="success"]')).waitFor();
+    assert.notEqual(await banner.evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(233, 252, 242)');
+    assert.equal(await banner.locator('strong').evaluate((node) => getComputedStyle(node).color), 'rgb(137, 219, 176)');
+    if (process.env.MBGC_AUDIT_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.MBGC_AUDIT_SCREENSHOTS, 'native-appearance-dark.png'), fullPage: true });
+    await choices.getByRole('radio', { name: 'Light', exact: true }).click();
+    await choices.getByRole('radio', { name: 'Light', exact: true }).and(page.locator('[aria-checked="true"]')).waitFor();
+    assert.equal(await banner.evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(233, 252, 242)');
+    assert.equal(await page.locator('#native-themes input:checked').inputValue(), 'red');
+    if (process.env.MBGC_AUDIT_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.MBGC_AUDIT_SCREENSHOTS, 'native-appearance-light.png'), fullPage: true });
+    await banner.getByRole('button', { name: 'Dismiss success' }).click();
+    await banner.waitFor({ state: 'detached' });
   } finally {
     await context?.close();
     await fs.rm(folder, { recursive: true, force: true });

@@ -122,7 +122,8 @@
     const scope = input.version === 1 ? withStoredScopes(typedScope(input.scope ?? {}), prefs, student) :
       withStoredScopes(typedScope(input.scope), prefs, student);
     return { format: backupFormat, version: backupVersion, exportedAt: input.exportedAt,
-      school: input.school.toLowerCase(), preferences: prefs, scope, student };
+      school: input.school.toLowerCase(), preferences: prefs, scope, student,
+      ...(Object.hasOwn(input, 'history') ? { history: app.readHistoryArchive(input.history) } : {}) };
   }
 
   function makeBackup({ school, settings, scope, student, exportedAt = new Date().toISOString() }) {

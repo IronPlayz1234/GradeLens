@@ -39,3 +39,14 @@ html[data-mbgc-native-dark] a.mbgc-nav[data-theme="dark"][aria-current="page"] {
   background: var(--mbgc-highlight, var(--mbgc-native-selection)) !important;
   color: var(--mbgc-ink, var(--mbgc-native-ink)) !important;
 }
+
+/* Native success confirmations can carry inline light colors. Pair the surface and ink. */
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="success"],.alert-success,.alert--success,.flash-success,.toast-success):where(:not(.mbgc-owned,.mbgc-owned *)) {
+  background-color: color-mix(in srgb, var(--mbgc-native-surface), var(--mbgc-native-success) 9%) !important;
+  color: var(--mbgc-native-success) !important;
+  border-color: color-mix(in srgb, var(--mbgc-native-border), var(--mbgc-native-success) 45%) !important;
+}
+html[data-mbgc-native-dark] :is([data-mbgc-audit-part="success"],.alert-success,.alert--success,.flash-success,.toast-success):where(:not(.mbgc-owned,.mbgc-owned *))
+  :is(strong,b,span,p,button,[role="button"],svg,i):where(:not(.badge,.badge *)) {
+  color: var(--mbgc-native-success) !important;
+}

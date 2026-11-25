@@ -333,18 +333,65 @@
   }
 
   function togglePersonalisation() {
-    const title = document.querySelector('main h1,[role="main"] h1,#content h1,#main-content h1,.main-content h1');
-    if (!/^(?:personalisation|personalization)$/i.test(app.clean(title?.textContent))) { appearancePanel?.remove(); return; }
-    if (!title || !title.closest('main,[role="main"],#content,#main-content,.main-content')) {
+    const content = knownMain();
+    const headings = [...content?.querySelectorAll('h1,h2,h3,h4,[role="heading"]') ?? []].filter((node) => !node.closest('.mbgc-owned'));
+    const titled = (pattern) => headings.find((node) => pattern.test(app.clean(node.textContent)));
+    const title = titled(/^Personali[sz]ation$/i);
+    const themes = titled(/^Themes$/i);
+    const accessibility = titled(/^Accessibility$/i);
+    if (!title && !(themes && /personali[sz]ation|preferences/i.test(location.pathname))) {
       appearancePanel?.remove();
       return;
     }
-    if (!appearancePanel) {
-      appearancePanel = app.h('section', 'mbgc-owned mbgc-compact mbgc-personalisation',
-        app.h('h2', '', 'GradeLens appearance'), app.appearanceField(sync));
+    const cards = Boolean(themes);
+    if (!appearancePanel || appearancePanel.classList.contains('mbgc-theme-choices') !== cards) {
+      appearancePanel?.remove();
+      appearancePanel = app.h('section', 'mbgc-owned mbgc-personalisation ' + (cards ? 'mbgc-theme-choices' : 'mbgc-compact'),
+        app.h('h2', '', 'Appearance'));
+      if (cards) {
+        const modes = [['light', 'Light', '☀'], ['dark', 'Dark', '☾'], ['system', 'Follow System', '◐']];
+        const choices = app.h('div', 'mbgc-appearance-options');
+        choices.setAttribute('role', 'radiogroup');
+        choices.setAttribute('aria-label', 'Appearance');
+        modes.forEach(([mode, label, symbol], index) => {
+          const graphic = app.h('span', 'mbgc-appearance-symbol', symbol);
+          graphic.setAttribute('aria-hidden', 'true');
+          const option = app.h('button', 'mbgc-appearance-option', graphic, app.h('span', '', label));
+          option.type = 'button';
+          option.dataset.mode = mode;
+          option.setAttribute('role', 'radio');
+          option.addEventListener('click', () => void sync.setSettings({ appearance: mode }));
+          option.addEventListener('keydown', (event) => {
+            const shift = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+            if (!shift) return;
+            event.preventDefault();
+            const target = choices.children[(index + shift + modes.length) % modes.length];
+            target.focus();
+            target.click();
+          });
+          choices.append(option);
+        });
+        appearancePanel.append(choices);
+      } else appearancePanel.append(app.appearanceField(sync));
     }
-    appearancePanel.querySelector('select').value = sync.settings.appearance;
-    if (!appearancePanel.isConnected) title.after(appearancePanel);
+    if (cards) {
+      for (const option of appearancePanel.querySelectorAll('[data-mode]')) {
+        const selected = option.dataset.mode === sync.settings.appearance;
+        option.setAttribute('aria-checked', String(selected));
+        option.tabIndex = selected ? 0 : -1;
+      }
+    } else appearancePanel.querySelector('select').value = sync.settings.appearance;
+    if (!appearancePanel.isConnected || !content.contains(appearancePanel)) {
+      const section = accessibility?.closest('section,[role="region"]');
+      if (cards && accessibility) {
+        const before = section && section !== content && !section.contains(themes) ? section : accessibility;
+        before.before(appearancePanel);
+      } else if (cards) {
+        const themeSection = themes.closest('section,[role="region"]');
+        if (themeSection && themeSection !== content) themeSection.after(appearancePanel);
+        else content.append(appearancePanel);
+      } else title.after(appearancePanel);
+    }
     if (theme) app.applyTheme(appearancePanel, theme);
   }
 
@@ -445,7 +492,7 @@
     if (panel) {
       card.remove();
       mountDashboard();
-      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.predictionRevision, sync.goalRevision, sync.refreshing, sync.refreshIssue,
+      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.predictionRevision, sync.goalRevision, sync.historyRevision, sync.refreshing, sync.refreshIssue,
         sync.message, sync.diagnostics, sync.storageState, sync.account, sync.identityStatus, [...changed]]);
       if (force || viewKey !== contentKey) {
         const editor = stageHost.shadowRoot?.activeElement ?? document.activeElement;
@@ -668,8 +715,8 @@
       if (!subject || !Object.hasOwn(subject.terms, key)) respond({ value: null });
       else respond({ value: app.compareMethods(app.gradeData(sync, message.classId, key)) });
     }
-    if (message?.type === 'mbgc:popup-transfer' && ['grades', 'backup', 'preview', 'restore'].includes(message.operation)) {
-      sync.transfer(message.operation, { backup: message.backup, token: message.token })
+    if (message?.type === 'mbgc:popup-transfer' && ['grades', 'history', 'backup', 'preview', 'restore'].includes(message.operation)) {
+      sync.transfer(message.operation, { backup: message.backup, token: message.token, includeHistory: message.includeHistory })
         .then((value) => respond({ value }), (error) => respond({ error: error.message }));
       return true;
     }

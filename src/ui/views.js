@@ -300,12 +300,12 @@
     return item;
   }
 
-  function subjectRow(sync, data, view) {
+  function subjectRow(sync, data, view, handlers) {
     const details = h('details', 'mbgc-subject');
     details.dataset.classId = data.classId;
     details.gradeEntry = sync.cache.classes[data.classId];
     details.gradeKey = JSON.stringify([data.termKey, data.bucket?.dataRevision, data.method, sync.settings.method, sync.settings.subjectMethods?.[data.classId], data.weights, data.scale, data.scaleLabel, sync.settings.compareMethods,
-      data.stale, data.error, view.changed.has(data.classId + ':' + data.termKey)]);
+      data.stale, data.error, sync.historyRevision, view.clearHistory, view.historyMessages?.get(data.classId), view.changed.has(data.classId + ':' + data.termKey)]);
     details.open = view.expanded.has(data.classId);
     let breakdown;
     function openBreakdown() {
@@ -351,7 +351,7 @@
         h('span', 'mbgc-subject-status', gradeInfo(data, 'mbgc-subject-info-' + data.classId)),
         h('span', 'mbgc-chevron', icon('chevron'))),
       h('div', 'mbgc-subject-detail',
-        subjectMethod(sync, data.classId), comparison,
+        subjectMethod(sync, data.classId), comparison, app.historyPanel(sync, data, view, handlers.render),
         data.missing ? h('p', 'mbgc-notice', data.missing) : null,
         data.error ? h('p', 'mbgc-notice', data.error) :
           data.bucket?.lastScan && !data.bucket.complete ? h('p', 'mbgc-muted',
@@ -458,7 +458,9 @@
             h('label', 'mbgc-toggle-label', compare, 'Show all three calculation methods')),
           h('div', '', field('Class for manual weights', classChoice), field('Category weights', weights)),
           h('div', '', field('Letter boundaries', scale), h('p', 'mbgc-muted', 'Leave overrides blank to use detected values or the default task scale.'))),
-        h('div', 'mbgc-actions', save, clear), feedback, transfers));
+        h('div', 'mbgc-actions', save, clear), feedback,
+        h('section', '', h('h3', '', 'Grade history'), app.historyControls(sync, view, null, handlers.render)),
+        transfers));
     if (!subjects.length) {
       classChoice.disabled = true;
       weights.disabled = true;
@@ -525,7 +527,8 @@
         button('Back to ManageBac', handlers.close, 'close', 'mbgc-close')),
       h('div', 'mbgc-header-title',
         h('h1', '', isEstimator ? 'Grade Estimator' : 'Overall Grades'),
-        refresh),
+        h('div', 'mbgc-header-actions', isEstimator ? null : app.gradeExportMenu(
+          (operation, options) => sync.transfer(operation, options), view.quickExport ??= {}, handlers.render), refresh)),
       h('div', 'mbgc-toolbar',
         field('Academic term', termChoice),
         field('Global calculation method', method),
@@ -573,7 +576,7 @@
       const columns = h('div', 'mbgc-subject-columns', h('span', '', 'Subject'),
         h('span', '', 'Method'), h('span', '', 'Calculated grade'));
       columns.setAttribute('aria-hidden', 'true');
-      content.append(columns, h('div', 'mbgc-subjects', rows.map((data) => subjectRow(sync, data, view))));
+      content.append(columns, h('div', 'mbgc-subjects', rows.map((data) => subjectRow(sync, data, view, handlers))));
     }
     if (!hasEstimate) {
       const recovery = empty('No grade estimates for this term yet',

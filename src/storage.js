@@ -1,4 +1,4 @@
-importScripts('core/grades.js', 'core/goal-planner.js', 'core/cache.js', 'core/settings-backup.js', 'repository.js', 'appearance-registry.js', 'backup-storage.js');
+importScripts('core/grades.js', 'core/goal-planner.js', 'core/cache.js', 'core/grade-report.js', 'core/history.js', 'core/settings-backup.js', 'repository.js', 'appearance-registry.js', 'backup-storage.js', 'history-storage.js');
 
 const app = globalThis.MBGC;
 const origin = 'https://uia.managebac.com';
@@ -85,6 +85,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!account) throw new Error('A student account was not identified.');
     const key = `mbgc:cache:${new URL(origin).host}:${account}`;
     const overrideKey = `mbgc:overrides:${new URL(origin).host}:${account}`;
+    if (message.type === 'mbgc:history') return historyOperation(account, message);
     if (message.type === 'mbgc:predictions') {
       const prediction = app.prediction(message.prediction);
       const storageKey = studentStorageKeys(new URL(origin).host, account).predictions;
@@ -131,8 +132,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         void notify(account, sender.tab?.id).catch(() => {});
         return cleared;
       }
-      if (message.type === 'mbgc:scan' &&
-        await commitScans(account, state, message.snapshots, message.checks ?? [])) {
+      const beforeCache = state.cache;
+      if (message.type === 'mbgc:scan' && await commitScans(account, state, message.snapshots, message.checks ?? [])) {
+        const ids = Object.keys(state.cache.classes).filter((id) => state.cache.classes[id] !== beforeCache.classes[id]);
+        if (ids.length) await observeCommittedHistory(account, state.cache, { beforeCache, ids });
         void notify(account, sender.tab?.id).catch(() => {});
       }
       return replyFor(state, message.since, message.epoch);

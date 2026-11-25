@@ -18,7 +18,11 @@ async function settingsTransfer(message, sender, account, school) {
     predictions: stored[keys.predictions] ?? [], goalPlans: stored[keys.goalPlans] ?? []
   } : null;
   const scope = account ? app.scopeFromCache((await loadAccount(account)).cache) : {};
-  if (operation === 'backup') return app.makeBackup({ school, settings, student, scope });
+  if (operation === 'backup') {
+    const file = app.makeBackup({ school, settings, student, scope });
+    if (message.includeHistory === true && account) file.history = app.archiveHistory(await readLocalHistory(account), await historyOwner(account));
+    return file;
+  }
 
   const now = Date.now();
   for (const [token, ticket] of restoreTickets) if (ticket.expires < now) restoreTickets.delete(token);
@@ -28,7 +32,17 @@ async function settingsTransfer(message, sender, account, school) {
     for (const [token, ticket] of restoreTickets) if (ticket.caller === caller) restoreTickets.delete(token);
     if (restoreTickets.size >= 20) restoreTickets.delete(restoreTickets.keys().next().value);
     const token = crypto.randomUUID();
-    restoreTickets.set(token, { restore, account, caller, baseline, expires: now + 10 * 60 * 1000 });
+    let archived;
+    if (Object.hasOwn(message.backup, 'history')) {
+      const incoming = app.readHistoryArchive(message.backup.history);
+      if (account && message.backup.school.toLowerCase() === school && incoming.owner === await historyOwner(account)) {
+        const history = await readLocalHistory(account);
+        const merged = app.mergeHistory(history, incoming, scope);
+        if (merged.added) archived = { baseline: JSON.stringify(history), history: merged.history };
+        restore.preview.history = { added: merged.added, skipped: merged.skipped, full: merged.full, matched: true };
+      } else restore.preview.history = { matched: false };
+    }
+    restoreTickets.set(token, { restore, account, caller, baseline, archived, expires: now + 10 * 60 * 1000 });
     return { token, ...restore.preview };
   }
   if (operation === 'restore') {
@@ -44,6 +58,12 @@ async function settingsTransfer(message, sender, account, school) {
           scale: Object.hasOwn(restored, 'scale') ? restored.scale : student.scale };
       }
       for (const key of ['predictions', 'goalPlans']) if (Object.hasOwn(restored, key)) patch[keys[key]] = restored[key];
+    }
+    if (ticket.archived) {
+      if (ticket.archived.baseline !== JSON.stringify(await readLocalHistory(account))) {
+        throw new Error('Grade history changed after this preview. Select the backup again to review it.');
+      }
+      patch[historyStorageKey(account)] = ticket.archived.history;
     }
     await chrome.storage.local.set(patch);
     restoreTickets.delete(message.token);

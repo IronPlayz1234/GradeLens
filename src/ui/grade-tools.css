@@ -34,3 +34,21 @@
 @media (max-width: 360px) {
   .gl-comparison-grid { grid-template-columns: 1fr; }
 }
+.gl-quick-export { position: relative; cursor: pointer; }
+.gl-quick-export > summary { cursor: pointer; }
+.gl-quick-export-options {
+  position: absolute;
+  z-index: 3;
+  inset-inline-end: 0;
+  inset-block-start: calc(100% + 5px);
+  display: grid;
+  gap: 6px;
+  inline-size: min(200px, 70vw);
+  padding: 9px;
+  border: 1px solid var(--mbgc-border);
+  border-radius: var(--gl-radius-control);
+  background: var(--mbgc-surface);
+  box-shadow: var(--mbgc-shadow);
+}
+.gl-quick-export-options p:empty { display: none; }
+.gl-backup-history { display: flex; align-items: center; justify-content: flex-start; gap: 7px; }

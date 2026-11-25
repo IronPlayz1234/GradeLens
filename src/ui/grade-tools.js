@@ -41,6 +41,51 @@
   }
   const filename = (kind, suffix) => 'gradelens-' + kind + '-' + new Date().toISOString().slice(0, 10) + '.' + suffix;
 
+  async function exportReport(request, kind, history = false) {
+    const report = await request(history ? 'history' : 'grades');
+    if (history ? !report.terms.some((term) => term.events.length) : !report.subjects.length) {
+      throw new Error(history ? 'There are no grade history observations to export yet.' :
+        'No grade data is available to export. Open Overall Grades to sync.');
+    }
+    const file = history ? 'history' : 'grades';
+    const csv = history ? app.historyCSV : app.gradeCSV;
+    if (kind === 'csv') download(csv(report), 'text/csv;charset=utf-8', filename(file, 'csv'));
+    else download(JSON.stringify(report, null, 2), 'application/json', filename(file, 'json'));
+  }
+
+  function gradeExportMenu(request, state, repaint) {
+    const menu = element('details', null, 'gl-quick-export');
+    menu.classList.add('mbgc-button');
+    menu.open = Boolean(state.open);
+    menu.addEventListener('toggle', () => { if (menu.isConnected) state.open = menu.open; });
+    const options = element('div', null, 'gl-quick-export-options');
+    options.append(element('p', 'Grade files contain private academic information.', 'gl-tool-note'));
+    const status = element('p', state.status, 'gl-tool-note');
+    status.setAttribute('role', 'status');
+    for (const [kind, label] of [['csv', 'Download grade CSV'], ['json', 'Download grade JSON']]) {
+      const button = element('button', label, 'mbgc-button');
+      button.type = 'button';
+      button.disabled = Boolean(state.busy);
+      button.addEventListener('click', async () => {
+        if (state.busy) return;
+        state.busy = true;
+        options.querySelectorAll('button').forEach((item) => { item.disabled = true; });
+        try { await exportReport(request, kind); state.status = 'Grade export downloaded.'; }
+        catch (error) { state.status = error.message; }
+        finally {
+          status.textContent = state.status;
+          state.busy = false;
+          options.querySelectorAll('button').forEach((item) => { item.disabled = false; });
+          repaint();
+        }
+      });
+      options.append(button);
+    }
+    options.append(status);
+    menu.append(element('summary', 'Export'), options);
+    return menu;
+  }
+
   function previewText(preview) {
     const list = [];
     const keys = { enabled: 'Extension enabled', appearance: 'Appearance', method: 'Global method',
@@ -65,6 +110,11 @@
     if (preview.skippedClasses || preview.skippedTerms) list.push(`Unavailable in this account: ${preview.skippedClasses} classes and ${preview.skippedTerms} class terms. Their data will be skipped.`);
     if (preview.termSkipped) list.push('The backed-up academic term is unavailable. The current selection will be kept.');
     if (preview.studentSkipped) list.push('Student-specific settings can be restored from a verified account at the same school.');
+    if (preview.history) list.push(preview.history.matched ?
+      `Merge ${preview.history.added} grade history observations and keep existing history.` +
+        (preview.history.skipped ? ` ${preview.history.skipped} observations belong to unavailable terms.` : '') +
+        (preview.history.full ? ` ${preview.history.full} observations exceed available history space.` : '') :
+      'Grade history belongs to a different or unavailable student account and will be skipped.');
     if (!list.length) list.push('There are no matching settings to restore.');
     return list;
   }
@@ -139,19 +189,20 @@
       review.scrollTop = 0;
     }
 
-    async function exportGrades(kind) {
-      const report = await request('grades');
-      if (!report.subjects.length) throw new Error('No grade data is available to export. Open Overall Grades to sync.');
-      if (kind === 'csv') download(app.gradeCSV(report), 'text/csv;charset=utf-8', filename('grades', 'csv'));
-      else download(JSON.stringify(report, null, 2), 'application/json', filename('grades', 'json'));
-    }
-
-    actions.append(action('Export Grades as CSV', () => void run(() => exportGrades('csv'), 'CSV grade export downloaded.')),
-      action('Export Grades as JSON', () => void run(() => exportGrades('json'), 'JSON grade export downloaded.')),
+    const historyOption = element('input');
+    Object.assign(historyOption, { type: 'checkbox', checked: Boolean(state.includeHistory) });
+    historyOption.addEventListener('change', () => { state.includeHistory = historyOption.checked; });
+    const includeHistory = element('label', null, 'gl-backup-history');
+    includeHistory.append(historyOption, 'Include grade history in backup');
+    actions.append(action('Export Grades as CSV', () => void run(() => exportReport(request, 'csv'), 'CSV grade export downloaded.')),
+      action('Export Grades as JSON', () => void run(() => exportReport(request, 'json'), 'JSON grade export downloaded.')),
+      action('Export Grade History as CSV', () => void run(() => exportReport(request, 'csv', true), 'CSV history export downloaded.')),
+      action('Export Grade History as JSON', () => void run(() => exportReport(request, 'json', true), 'JSON history export downloaded.')),
       action('Back Up Settings', () => void run(async () => {
-        const backup = await request('backup');
+        const backup = await request('backup', { includeHistory: Boolean(state.includeHistory) });
         download(JSON.stringify(backup, null, 2), 'application/json', filename('settings', 'json'));
-        return backup.student ? 'Settings backup downloaded.' : 'Preferences backed up. Open a verified ManageBac tab to include student overrides and saved scenarios.';
+        return backup.history ? 'Settings and grade history backup downloaded.' : backup.student ? 'Settings backup downloaded.' :
+          'Preferences backed up. Open a verified ManageBac tab to include student overrides and saved scenarios.';
       })), picker);
     file.addEventListener('change', () => {
       if (!file.files.length) return;
@@ -171,11 +222,11 @@
       });
     });
     body.append(element('p', 'Grade exports contain private academic information. Share them only with people you trust.', 'gl-tool-note'),
-      actions, file, review, feedback);
+      actions, includeHistory, file, review, feedback);
     details.append(element('summary', 'Export & Backup'), body);
     drawPreview();
     return details;
   }
 
-  Object.assign(app, { comparisonContent, transferPanel });
+  Object.assign(app, { comparisonContent, transferPanel, gradeExportMenu });
 })();

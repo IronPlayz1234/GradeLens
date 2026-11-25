@@ -13,6 +13,7 @@
   const specialPaint = '.badge,.avatar,[data-role="avatar"],.status,[data-status],[data-category-color],img,svg';
   const navigationTitle = /^(My Workspace|Workspace|Classes|Groups)(?:\s*[WCG])?$/i;
   const memberLink = 'a[href*="/student/groups/"],a[href*="/student/ib-groups/"]';
+  const positiveNotice = '.alert-success,.alert--success,.flash-success,.toast-success,[data-alert-type="success"],[role="alert"],[role="status"]';
   const guidance = '.alert-info,.guidance-banner,[data-guidance],[role="alert"],[role="status"]';
   const activityRow = '.activity-item,.activity-entry,[data-activity-item],[data-activity-entry]';
   const activityLink = 'a[href*="/core_tasks/"],a[href*="/tasks/"],a[href*="/messages/"]';
@@ -22,7 +23,7 @@
   const mainSelector = 'main,[role="main"],#main-content,#content,.main-content';
   const menus = 'nav,aside,[role="navigation"],[role="menu"],.sidebar,.dropdown-menu,[data-sidebar],.sidebar-flyout,.navigation-flyout,.sidebar-menu,.flyout,.main-sidebar,.navigation-rail,.side-navigation,[data-navigation-rail]';
   const scheduleSelector = menus + ',' + headings + ',table,[role="table"],[role="grid"],[role="row"],' +
-    '.fc,.lesson-card,.timetable-card,.calendar-event,.group-card,.group-row,section,article,a,button,' + guidance + ',' + activityRow;
+    '.fc,.lesson-card,.timetable-card,.calendar-event,.group-card,.group-row,section,article,a,button,strong,b,' + guidance + ',' + activityRow + ',' + positiveNotice;
   const tagged = new Set();
   let queued = false;
   let route;
@@ -196,6 +197,29 @@
     }
   }
 
+  function inspectSuccess() {
+    for (const notice of [...document.querySelectorAll(positiveNotice)].slice(0, 100)) {
+      if (notice.closest(owned)) continue;
+      const text = app.clean(notice.textContent);
+      if (notice.matches('.alert-success,.alert--success,.flash-success,.toast-success,[data-alert-type="success"]') ||
+          /^success(?:[.!:]|\s*$)|^your changes (?:have been )?successfully saved/i.test(text)) {
+        mark(notice, part, 'success');
+      }
+    }
+    // Some native save confirmations publish the same copy without a live-region role.
+    for (const heading of [...document.querySelectorAll('strong,b')].slice(0, 120)) {
+      if (heading.closest(owned) || !/^Success[.!]?$/i.test(app.clean(heading.textContent))) continue;
+      let wrapper = heading.parentElement;
+      for (let depth = 0; wrapper && depth < 3; depth++, wrapper = wrapper.parentElement) {
+        if (/^success[.!]?\s+your changes (?:have been )?successfully saved/i.test(app.clean(wrapper.textContent)) &&
+            wrapper.querySelector('button,[role="button"]')) {
+          mark(wrapper, part, 'success');
+          break;
+        }
+      }
+    }
+  }
+
   function inspectGuidance(main) {
     for (const banner of main.querySelectorAll(guidance)) {
       if (banner.matches('.alert-info,.guidance-banner,[data-guidance]') ||
@@ -259,6 +283,7 @@
       inspectGuidance(main);
       inspectActivity(main);
     }
+    inspectSuccess();
     inspectMenus(main);
   }
 

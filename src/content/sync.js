@@ -2,6 +2,10 @@
   const app = globalThis.MBGC;
   const prefsKey = app.preferencesKey;
   const overrideKey = (account) => 'mbgc:overrides:' + location.host + ':' + account;
+  const historyKey = (account) => 'mbgc:history:' + location.host + ':' + account;
+  const usableHistory = (data) => data?.version === 1 ? data : {
+    ...app.emptyHistory(), ...(data ? { issue: 'This saved grade history uses a newer version.' } : {})
+  };
   const predictionKey = (account) => 'mbgc:predictions:' + location.host + ':' + account;
   const goalsKey = (account) => 'mbgc:goal-plans:' + location.host + ':' + account;
   const parallelPages = 3;
@@ -66,6 +70,8 @@
     predictionRevision = 0;
     predictionWrites = new Map();
     goalRevision = 0;
+    history = null;
+    historyRevision = 0;
     refreshing = false;
     message = '';
     lastAttempt = 0;
@@ -104,12 +110,16 @@
       });
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'local' && changes[prefsKey]) {
+          const before = this.settings;
           this.settings = app.normalizeSettings(changes[prefsKey].newValue);
+          if (before.method !== this.settings.method || JSON.stringify(before.subjectMethods) !== JSON.stringify(this.settings.subjectMethods)) this.observeHistorySettings();
           if (!this.settings.enabled) this.stopRefresh();
           this.update();
         }
         if (this.account && area === 'local' && changes[overrideKey(this.account)]) {
+          const before = this.overrides;
           this.overrides = changes[overrideKey(this.account)].newValue ?? { weights: {}, scale: null };
+          if (JSON.stringify(before) !== JSON.stringify(this.overrides)) this.observeHistorySettings();
           this.update();
         }
         if (this.account && area === 'local' && changes[predictionKey(this.account)]) {
@@ -120,6 +130,11 @@
           }
           this.predictions = [...values.values()];
           this.predictionRevision++;
+          this.update();
+        }
+        if (this.account && area === 'local' && changes[historyKey(this.account)]) {
+          this.history = usableHistory(changes[historyKey(this.account)].newValue);
+          this.historyRevision++;
           this.update();
         }
         if (this.account && area === 'local' && changes[goalsKey(this.account)]) {
@@ -163,6 +178,8 @@
       if (this.account === next) return;
       this.cancel?.abort();
       this.account = next;
+      this.history = null;
+      this.historyRevision++;
       this.cache = app.freshCache();
       this.revision++;
       this.overrides = { weights: {}, scale: null };
@@ -182,7 +199,7 @@
       this.update();
       if (!next) return;
       const [cache, local] = await Promise.allSettled([
-        request('get', next), chrome.storage.local.get([overrideKey(next), predictionKey(next)])
+        request('get', next), chrome.storage.local.get([overrideKey(next), predictionKey(next), historyKey(next)])
       ]);
       if (this.account !== next) return;
       if (cache.status === 'fulfilled') {
@@ -193,6 +210,9 @@
         this.overrides = local.value[overrideKey(next)] ?? this.overrides;
         this.predictions = local.value[predictionKey(next)] ?? this.predictions;
         this.predictionRevision++;
+        this.history = usableHistory(local.value[historyKey(next)]);
+        this.historyRevision++;
+        this.observeHistorySettings();
       }
     }
 
@@ -336,10 +356,28 @@
 
     async transfer(operation, options = {}) {
       if (operation === 'grades') return app.gradeExport(this.cache, this.settings, this.overrides);
+      if (operation === 'history') return this.historyAction('export');
       const account = this.account ?? null;
       const reply = await request('settings-transfer', account, { operation, ...options });
       if ((this.account ?? null) !== account) throw new Error('The active student changed. Reopen the preview.');
       return reply;
+    }
+
+    async historyAction(operation, options = {}) {
+      const account = this.account;
+      if (!account) throw new Error('Verify your student account in ManageBac to use grade history.');
+      const value = await request('history', account, { operation, ...options });
+      if (this.account !== account) throw new Error('The active student changed.');
+      if (['enable', 'clear', 'get'].includes(operation)) {
+        this.history = value;
+        this.historyRevision++;
+        this.update();
+      }
+      return value;
+    }
+
+    observeHistorySettings() {
+      if (this.history?.enabled && this.account) void this.historyAction('settings').catch(() => {});
     }
 
     async savePredictions(classId, termId, entries, overrides) {

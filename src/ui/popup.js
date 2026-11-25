@@ -72,7 +72,7 @@
   }
 
   async function transfer(operation, payload) {
-    if (operation === 'grades' && !tab?.id) throw new Error('Open a signed-in ManageBac tab to export grades.');
+    if (['grades', 'history'].includes(operation) && !tab?.id) throw new Error('Open a signed-in ManageBac tab to export grades.');
     const reply = tab?.id != null ?
       await chrome.tabs.sendMessage(tab.id, { type: 'mbgc:popup-transfer', operation, ...payload }, { frameId: 0 }) :
       await chrome.runtime.sendMessage({ type: 'mbgc:settings-transfer', operation, ...payload });
