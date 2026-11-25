@@ -1,27 +1,75 @@
 {
   "manifest_version": 3,
-  "name": "GradeLens — for ManageBac",
-  "version": "1.21",
-  "icons": { "16": "assets/icons/gradelens-16.png", "32": "assets/icons/gradelens-32.png", "48": "assets/icons/gradelens-48.png", "128": "assets/icons/gradelens-128.png" },
+  "name": "GradeLens \u2014 for ManageBac",
+  "version": "1.22",
+  "icons": {
+    "16": "assets/icons/gradelens-16.png",
+    "32": "assets/icons/gradelens-32.png",
+    "48": "assets/icons/gradelens-48.png",
+    "128": "assets/icons/gradelens-128.png"
+  },
   "description": "Independent grade estimates and what-if planning for ManageBac. Created by Sohan Tripathy.",
-  "action": { "default_popup": "popup.html", "default_icon": { "16": "assets/icons/gradelens-16.png", "32": "assets/icons/gradelens-32.png" }, "default_title": "GradeLens — for ManageBac" },
-  "permissions": ["storage"],
-  "host_permissions": ["https://uia.managebac.com/*"],
-  "background": { "service_worker": "src/storage.js" },
-  "web_accessible_resources": [{ "resources": ["src/ui/styles.css", "src/ui/tokens.css", "assets/icons/gradelens-48.png"], "matches": ["https://uia.managebac.com/*"] }],
-  "content_scripts": [{
-    "matches": ["https://uia.managebac.com/student", "https://uia.managebac.com/student/*"],
-    "js": [
-      "src/core/grades.js",
-      "src/core/cache.js",
-      "src/content/scanner.js",
-      "src/content/sync.js",
-      "src/ui/theme.js",
-      "src/ui/icons.js",
-      "src/ui/views.js",
-      "src/content/index.js"
-    ],
-    "css": ["src/ui/tokens.css", "src/ui/styles.css"],
-    "run_at": "document_idle"
-  }]
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/icons/gradelens-16.png",
+      "32": "assets/icons/gradelens-32.png"
+    },
+    "default_title": "GradeLens \u2014 for ManageBac"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://uia.managebac.com/*"
+  ],
+  "background": {
+    "service_worker": "src/storage.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/ui/styles.css",
+        "src/ui/tokens.css",
+        "assets/icons/gradelens-48.png"
+      ],
+      "matches": [
+        "https://uia.managebac.com/*"
+      ]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://uia.managebac.com/student",
+        "https://uia.managebac.com/student/*"
+      ],
+      "css": [
+        "src/ui/tokens.css",
+        "src/ui/styles.css",
+        "src/ui/native-dark.css"
+      ],
+      "js": [
+        "src/ui/theme.js",
+        "src/content/appearance.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://uia.managebac.com/student",
+        "https://uia.managebac.com/student/*"
+      ],
+      "js": [
+        "src/core/grades.js",
+        "src/core/cache.js",
+        "src/content/scanner.js",
+        "src/content/sync.js",
+        "src/ui/icons.js",
+        "src/ui/views.js",
+        "src/content/index.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
 }

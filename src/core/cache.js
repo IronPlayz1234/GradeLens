@@ -1,7 +1,7 @@
 (() => {
   const app = globalThis.MBGC;
   const settingsDefaults = {
-    enabled: true, appearance: 'native', method: 'percentage', subjectMethods: {},
+    enabled: true, appearance: 'system', method: 'percentage', subjectMethods: {},
     showGrades: true, showEstimator: true, showBadges: true, showOverview: true, showTasks: true, refreshMinutes: 5, density: 'comfortable', progressBars: true, motion: 'full', welcomeSeen: false
   };
   const preferencesKey = 'mbgc:preferences';
@@ -13,6 +13,7 @@
   };
   const normalizeSettings = (stored) => ({ ...settingsDefaults, ...stored,
     method: methodFor(stored ?? {}),
+    appearance: ['system', 'light', 'dark'].includes(stored?.appearance) ? stored.appearance : 'system',
     subjectMethods: Object.fromEntries(Object.entries(stored?.subjectMethods ?? {}).filter(([id, method]) =>
       classIdValid(id) && methodValid(method))) });
   function patchSettings(stored, { patch, subject }) {
@@ -25,7 +26,7 @@
     }
     for (const [key, value] of Object.entries(patch ?? {})) {
       if (!Object.hasOwn(settingsDefaults, key) || key === 'subjectMethods') continue;
-      const allowed = { appearance: ['native', 'system', 'light', 'dark'], density: ['comfortable', 'compact'],
+      const allowed = { appearance: ['system', 'light', 'dark'], density: ['comfortable', 'compact'],
         motion: ['full', 'reduced', 'off'] }[key];
       if (key === 'method' ? methodValid(value) : allowed ? allowed.includes(value) :
         typeof settingsDefaults[key] === 'boolean' ? typeof value === 'boolean' :

@@ -477,8 +477,8 @@
   }
 
   function appearanceField(sync) {
-    return field('Appearance', select([['native', 'Match ManageBac'], ['system', 'Follow system'],
-      ['light', 'Light'], ['dark', 'Dark']], sync.settings.appearance ?? 'native',
+    return field('Appearance', select([['system', 'Follow System'],
+      ['light', 'Light'], ['dark', 'Dark']], sync.settings.appearance ?? 'system',
       (appearance) => sync.setSettings({ appearance })));
   }
 

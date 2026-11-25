@@ -29,6 +29,7 @@
   let nativeAnchor;
   let navKey;
   let activeNativeMenu;
+  let selectedNativeLink;
   let appearancePanel;
   let wasEnabled;
   let openSettings = false;
@@ -157,6 +158,8 @@
     fallback?.remove();
     activeNativeMenu?.removeAttribute('data-mbgc-view-active');
     activeNativeMenu = null;
+    selectedNativeLink?.removeAttribute('data-mbgc-nav-native');
+    selectedNativeLink = null;
     nav = [];
     navKey = undefined;
   }
@@ -320,12 +323,39 @@
     if (theme) app.applyTheme(appearancePanel, theme);
   }
 
-  function configureNativeAppearance() {
+  function syncNavigationSelection(panel) {
+    const scope = nativeAnchor?.closest('aside,.sidebar') ?? nativeAnchor?.closest('nav,[role="navigation"]');
+    const current = new URL(location.href);
+    const sameRoute = (link) => {
+      const url = app.localURL(link.getAttribute('href'), current);
+      return url && url.pathname.replace(/\/$/, '') === current.pathname.replace(/\/$/, '') &&
+        (!url.search || url.search === current.search) && (!url.hash || url.hash === current.hash);
+    };
+    const matches = !panel && scope ? [...scope.querySelectorAll('a[href]:not(.mbgc-nav)')].filter(sameRoute) : [];
+    const native = matches.find((link) => link.matches('.active,.selected,[aria-current="page"]') ||
+      link.parentElement.matches('li.active,li.selected')) ?? matches[0] ?? null;
+    if (native !== selectedNativeLink) {
+      selectedNativeLink?.removeAttribute('data-mbgc-nav-native');
+      selectedNativeLink = native;
+      selectedNativeLink?.setAttribute('data-mbgc-nav-native', '');
+    }
+    const menu = panel || native ? scope ?? null : null;
+    if (activeNativeMenu !== menu) {
+      activeNativeMenu?.removeAttribute('data-mbgc-view-active');
+      activeNativeMenu = menu;
+      activeNativeMenu?.setAttribute('data-mbgc-view-active', '');
+    }
+  }
+
+  function setNativeAccent(theme) {
     const root = document.documentElement;
-    const preference = sync.settings.appearance;
-    const useDark = preference === 'dark' || (preference === 'system' && app.scheme.matches);
-    // ManageBac Reimagined owns native appearance while its theme is active.
-    root.toggleAttribute('data-mbgc-native-dark', useDark && !root.hasAttribute('data-mbr-mode'));
+    for (const [name, value] of Object.entries({
+      '--mbgc-native-accent': theme?.accent, '--mbgc-native-selection': theme?.highlight,
+      '--mbgc-native-ink': theme?.ink, '--mbgc-native-on-accent': theme?.onAccent
+    })) {
+      if (!value) root.style.removeProperty(name);
+      else if (root.style.getPropertyValue(name) !== value) root.style.setProperty(name, value);
+    }
   }
 
   function render(force = false) {
@@ -337,7 +367,7 @@
       removeNav();
       appearancePanel?.remove();
       for (const icon of document.querySelectorAll('.mbgc-native-glyph')) icon.remove();
-      document.documentElement.removeAttribute('data-mbgc-native-dark');
+      setNativeAccent(null);
       wasEnabled = false;
       return;
     }
@@ -358,23 +388,17 @@
         if (root.dataset[key] !== value) root.dataset[key] = value;
       }
     }
-    configureNativeAppearance();
     const nextTheme = app.getTheme(nativeAnchor, sync.settings.appearance);
     const nextThemeKey = JSON.stringify(nextTheme);
     if (nextThemeKey !== themeKey) {
       theme = nextTheme;
       themeKey = nextThemeKey;
+      setNativeAccent(theme);
       for (const node of [stage, stageHost, card, ...nav]) app.applyTheme(node, theme);
     }
     updateChanges();
     const panel = views[location.hash];
-    const menu = panel && nativeAnchor
-      ? nativeAnchor.closest('aside,.sidebar') ?? nativeAnchor.closest('nav,[role="navigation"]') : null;
-    if (activeNativeMenu !== menu) {
-      activeNativeMenu?.removeAttribute('data-mbgc-view-active');
-      activeNativeMenu = menu;
-      activeNativeMenu?.setAttribute('data-mbgc-view-active', '');
-    }
+    syncNavigationSelection(panel);
     if (panel) appearancePanel?.remove();
     else togglePersonalisation();
     nav.forEach((link) => {
@@ -528,10 +552,10 @@
       const children = [...entry.addedNodes, ...entry.removedNodes];
       if (entry.type === 'childList' && children.every(owns)) continue;
       if (target.closest('nav,aside,[role="navigation"],.sidebar') &&
-          (entry.type === 'childList' || entry.attributeName === 'aria-current')) scheduleRender();
+          (entry.type === 'childList' || ['aria-current', 'class', 'href'].includes(entry.attributeName))) scheduleRender();
       if (entry.type === 'attributes' && (target === document.body || target === document.documentElement ||
         target.matches('main,[role="main"],nav,aside')) &&
-        /^(class|style|data-theme|data-bs-theme|data-color-scheme|data-mbr-mode)$/.test(entry.attributeName)) {
+        (['class', 'style', ...app.themeAttributes].includes(entry.attributeName))) {
         scheduleRender();
         continue;
       }
@@ -556,8 +580,8 @@
   const observer = new MutationObserver(handleMutations);
   observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
     attributeFilter: ['data-selected-term-id', 'data-term-id', 'data-total-count', 'class', 'style', 'hidden', 'aria-hidden',
-      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme', 'data-mbr-mode'] });
+      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', ...app.themeAttributes] });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', ...app.themeAttributes] });
   window.addEventListener('popstate', reconcile);
   window.addEventListener('hashchange', reconcile);
   window.navigation?.addEventListener('currententrychange', reconcile);

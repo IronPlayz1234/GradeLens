@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" data-theme="orange">
+<head>
+<meta charset="utf-8">
+<title>ManageBac student appearance fixture</title>
+<style>
+  body { margin: 0; background: #f3f5f8; color: #1e2937; font: 15px/1.5 system-ui; }
+  body > header { padding: 15px 24px; background: #fff; border-bottom: 1px solid #d8dce4; display: flex; justify-content: space-between; }
+  a { color: #095aaa; }
+  .layout { display: grid; grid-template-columns: 205px minmax(0,1fr); min-height: calc(100vh - 54px); }
+  .sidebar { background: #fff; border-inline-end: 1px solid #d8dce4; padding: 18px 12px; }
+  .sidebar ul { list-style: none; padding: 0; margin: 12px 0; }
+  .sidebar li { position: relative; margin: 3px 0; }
+  .sidebar a { padding: 8px 10px; text-decoration: none; display: flex; align-items: center; gap: 6px; }
+  .sidebar .active { background: #fffaea; border-radius: 6px; box-shadow: inset 2px 0 #db6903; }
+  .sidebar .active::before, .sidebar a[aria-current]::after, .sidebar .nav-item[aria-current="page"]::before {
+    content: ''; position: absolute; inset: 4px auto 0 -2px; border-left: 3px solid #994800; border-radius: 7px;
+  }
+  main { padding: 24px; }
+  main h1 { font-size: 25px; margin: 0 0 10px; }
+  .panel, .card, .widget { border: 1px solid #d8dce4; border-radius: 9px; background: #fff; margin-block: 12px; overflow: hidden; }
+  .panel-heading { padding: 10px 14px; font-weight: 700; background: #edf2f7; }
+  .panel-body, .card-body, .widget-body { padding: 14px; }
+  .panel-body p { margin-block: 0 12px; }
+  .columns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+  .table, .fc { width: 100%; border-collapse: collapse; }
+  th,td { text-align: start; padding: 8px; border: 1px solid #e1e5ec; }
+  .form-control { min-height: 34px; margin: 4px 0 11px; border: 1px solid #adb6bf; border-radius: 5px; padding: 3px 8px; }
+  .btn-primary { padding: 6px 10px; border: 1px solid #db6903; border-radius: 5px; background: #db6903; color: white; }
+  .fc-event { padding: 3px 7px; border-radius: 4px; background: #225581; color: #fff; text-decoration: none; }
+  .text-muted { color: #5f6e7b; }
+  .text-danger { color: #c93546; }
+</style>
+</head>
+<body>
+<header><strong>ManageBac</strong><a href="/student/profile/9">Manage Your Profile</a></header>
+<div class="layout">
+  <aside class="sidebar">
+    <nav aria-label="My Workspace">
+      <strong>My Workspace</strong>
+      <ul>
+        <li><a class="nav-item" href="/student/dashboard">Dashboard</a></li>
+        <li><a class="nav-item" href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a></li>
+        <li><a class="nav-item" href="/student/calendar">Calendar</a></li>
+        <li><a class="nav-item" href="/student/timetables">Timetables</a></li>
+        <li><a class="nav-item" href="/student/settings/personalisation">Personalisation</a></li>
+      </ul>
+      <a href="/student/classes/123">Mathematics</a>
+    </nav>
+  </aside>
+  <main id="content">__CONTENT__</main>
+</div>
+</body>
+</html>

@@ -21,13 +21,10 @@
       if (input.type === 'checkbox') input.checked = value;
       else input.value = value;
     }
-    const preference = settings.appearance;
+    const mode = app.modeFor(settings.appearance, system.matches);
     const native = state?.theme;
-    const mode = preference === 'native' ? native?.mode ?? (system.matches ? 'dark' : 'light') :
-      preference === 'system' ? (system.matches ? 'dark' : 'light') : preference;
-    document.documentElement.dataset.theme = mode;
-    if (native?.mode === mode && native.ink) document.documentElement.style.setProperty('--site-ink', native.ink);
-    else document.documentElement.style.removeProperty('--site-ink');
+    const tokens = native?.mode === mode ? native : app.themeTokens(mode, native?.name);
+    app.applyTheme(document.documentElement, tokens);
     const subjects = (state?.subjects ?? []).filter(([id]) => /^\d+$/.test(id));
     const key = JSON.stringify(subjects);
     if (key !== rosterKey) {

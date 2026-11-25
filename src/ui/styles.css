@@ -6,7 +6,7 @@
   --mbgc-muted: #5e576d;
   --mbgc-base: #f6f4fa;
   --mbgc-border: #e3deec;
-  --mbgc-tint: color-mix(in srgb, var(--mbgc-accent) 10%, var(--mbgc-surface));
+  --mbgc-tint: var(--mbgc-highlight, color-mix(in srgb, var(--mbgc-accent) 10%, var(--mbgc-surface)));
   --mbgc-shadow: 0 1px 2px #2515390b, 0 8px 24px #2515390a;
   --mbgc-radius: var(--gl-radius-surface, 12px);
   --mbgc-good: #206747;
@@ -34,7 +34,7 @@
 .mbgc-owned :is(h1,h2,h3,h4,p) { margin: 0; color: inherit; font-family: inherit; }
 .mbgc-owned [hidden] { display: none !important; }
 .mbgc-owned :is(button,select,input,textarea,summary,a):focus-visible, .mbgc-nav:focus-visible {
-  outline: 2px solid var(--mbgc-ink, currentColor);
+  outline: 2px solid var(--mbgc-accent, currentColor);
   outline-offset: 3px;
 }
 .mbgc-owned svg, .mbgc-nav svg { display: inline-block; width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -102,8 +102,8 @@ a > .mbgc-sidebar-grade {
 .mbgc-owned .mbgc-button:active:not(:disabled) { transform: translateY(1px); }
 .mbgc-owned .mbgc-button:disabled, .mbgc-owned .mbgc-input:disabled { opacity: .55; cursor: default; }
 .mbgc-button svg { width: 16px; height: 16px; }
-.mbgc-owned .mbgc-primary { background: var(--mbgc-ink); border-color: var(--mbgc-ink); color: var(--mbgc-surface); }
-.mbgc-owned .mbgc-primary:hover:not(:disabled) { background: var(--mbgc-ink); color: var(--mbgc-surface); opacity: .88; }
+.mbgc-owned .mbgc-primary { background: var(--mbgc-accent); border-color: var(--mbgc-accent); color: var(--mbgc-on-accent, var(--mbgc-surface)); }
+.mbgc-owned .mbgc-primary:hover:not(:disabled) { background: var(--mbgc-accent); color: var(--mbgc-on-accent, var(--mbgc-surface)); opacity: .88; }
 
 .mbgc-section-heading { justify-content: space-between; margin: 26px 0 12px; }
 .mbgc-section-heading h2, .mbgc-panel h2 { font-size: 18px; font-weight: 690; letter-spacing: -.022em; }
@@ -204,7 +204,7 @@ a > .mbgc-sidebar-grade {
 .mbgc-panel-heading { align-items: flex-start; margin-bottom: 15px; }
 .mbgc-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .mbgc-owned .mbgc-mode .mbgc-button { min-inline-size: 0; min-block-size: 45px; }
-.mbgc-owned .mbgc-mode .mbgc-button[aria-pressed="true"] { border-color: var(--mbgc-ink); color: var(--mbgc-ink); background: var(--mbgc-tint); }
+.mbgc-owned .mbgc-mode .mbgc-button[aria-pressed="true"] { border-color: var(--mbgc-accent); color: var(--mbgc-ink); background: var(--mbgc-tint); }
 .mbgc-owned .mbgc-mode-help { margin: 8px 0 14px; }
 .mbgc-mode-help + .mbgc-field { margin-bottom: 12px; }
 .mbgc-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
@@ -408,56 +408,34 @@ a > .mbgc-sidebar-grade {
   .mbgc-prediction-arrow { display: none; }
 }
 
-/* Visual selection only. ManageBac retains its own navigation state for Back/Forward. */
-[data-mbgc-view-active] :is(a.active, a.selected, a[aria-current="page"], li.active, li.selected, li.active > a, li.selected > a):not(.mbgc-owned,.mbgc-owned *) {
+/* A single rounded border paints the stripe; native active layers are suppressed only in the managed menu. */
+[data-mbgc-view-active] :is(a.active,a.selected,a[aria-current="page"],li.active,li.selected,li.active > a,li.selected > a):not(.mbgc-owned,.mbgc-owned *,[data-mbgc-nav-native]),
+[data-mbgc-view-active] .mbgc-nav-shell {
   background: transparent !important;
   box-shadow: none !important;
   border-color: transparent !important;
-  color: inherit !important;
 }
-.mbgc-nav[aria-current="page"] {
-  background: color-mix(in srgb, var(--mbgc-accent) 15%, transparent) !important;
-  color: var(--mbgc-ink) !important;
-  box-shadow: inset 2px 0 var(--mbgc-ink);
-  border-radius: 6px;
+[data-mbgc-view-active] :is(a.active,a.selected,a[aria-current="page"],li.active,li.selected,li.active > a,li.selected > a)::before,
+[data-mbgc-view-active] :is(a.active,a.selected,a[aria-current="page"],li.active,li.selected,li.active > a,li.selected > a)::after,
+.mbgc-nav-shell::before, .mbgc-nav-shell::after, .mbgc-nav::before, .mbgc-nav::after {
+  content: none !important;
+  box-shadow: none !important;
 }
+.mbgc-nav, [data-mbgc-nav-native] { border-inline-start: 2px solid transparent; }
+.mbgc-nav[aria-current="page"], [data-mbgc-nav-native] {
+  background: var(--mbgc-highlight, var(--mbgc-native-selection)) !important;
+  color: var(--mbgc-ink, var(--mbgc-native-ink)) !important;
+  border: 0 solid transparent !important;
+  border-inline-start: 2px solid var(--mbgc-accent, var(--mbgc-native-accent)) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  background-clip: border-box !important;
+}
+.mbgc-nav[data-theme="light"][aria-current="page"] > svg.mbgc-glyph,
+html:not([data-mbgc-native-dark]) [data-mbgc-nav-native] > svg.mbgc-native-glyph { color: var(--mbgc-native-accent); }
+[data-mbgc-view-active] :is(a.active,a.selected,a[aria-current="page"]):not(.mbgc-owned,[data-mbgc-nav-native]) { color: inherit !important; }
 [data-mbgc-view-active] :is(a[href],button) > :is(svg,i) { flex-shrink: 0; }
 
-/* Optional native dark mode on recognized components. */
-html[data-mbgc-native-dark] {
-  color-scheme: dark;
-  --mbgc-native-bg: #151a20;
-  --mbgc-native-surface: #202730;
-  --mbgc-native-text: #e8edf3;
-  --mbgc-native-muted: #bac8d5;
-  --mbgc-native-border: #43505d;
-  background: var(--mbgc-native-bg);
-}
-html[data-mbgc-native-dark] :is(body, main, [role="main"], #content, #main-content, .main-content):not(.mbgc-owned,.mbgc-owned *) {
-  background-color: var(--mbgc-native-bg);
-  color: var(--mbgc-native-text);
-}
-html[data-mbgc-native-dark] :is(.sidebar,.navbar,.topbar,.card,.panel,.widget,.dropdown-menu,.dropdown-item,.modal-content,.popover,.list-group-item,.tooltip-inner):not(.mbgc-owned,.mbgc-owned *) {
-  background-color: var(--mbgc-native-surface);
-  border-color: var(--mbgc-native-border);
-  color: var(--mbgc-native-text);
-}
-html[data-mbgc-native-dark] :is(.text-muted,.text-secondary,.help-block):not(.mbgc-owned,.mbgc-owned *) {
-  color: var(--mbgc-native-muted) !important;
-}
-html[data-mbgc-native-dark] :is(.form-control,.form-select,textarea,select,.btn-default,.btn-secondary,input[type="text"],input[type="search"]):not(.mbgc-owned,.mbgc-owned *) {
-  background-color: var(--mbgc-native-bg);
-  color: var(--mbgc-native-text);
-  border-color: var(--mbgc-native-border);
-}
-html[data-mbgc-native-dark] :is(.table, .table > :not(caption) > * > *):not(.mbgc-owned,.mbgc-owned *) {
-  --bs-table-bg: var(--mbgc-native-surface);
-  --bs-table-color: var(--mbgc-native-text);
-  --bs-table-border-color: var(--mbgc-native-border);
-  border-color: var(--mbgc-native-border);
-}
-html[data-mbgc-native-dark] .highcharts-background:not(.mbgc-owned *) { fill: var(--mbgc-native-surface); }
-html[data-mbgc-native-dark] :is(.highcharts-axis-labels text,.highcharts-title,.highcharts-legend-item text):not(.mbgc-owned *) { fill: var(--mbgc-native-text) !important; }
 /* Native ManageBac rules sometimes fill all SVG descendants. Force the outline contract only on our glyphs. */
 a:is(.mbgc-nav, :has(> .mbgc-native-glyph)) > svg.mbgc-glyph {
   display: inline-block !important; width: 18px !important; height: 18px !important;

@@ -126,6 +126,7 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     await waitText('.mbgc-target-result', 'Already within reach');
 
     await page.setViewportSize({ width: 340, height: 840 });
+    await page.emulateMedia({ colorScheme: 'dark' });
     await page.evaluate(() => { document.body.dataset.theme = 'dark'; document.documentElement.style.removeProperty('--primary-color'); });
     await page.waitForFunction(() => {
       const stage = document.querySelector('#mbgc-stage-host')?.shadowRoot?.querySelector('.mbgc-stage');
@@ -994,7 +995,7 @@ test('toolbar preferences, independent subject methods, all grade views and rest
     assert.equal(await other.locator('html').getAttribute('data-mbgc-native-dark'), null);
     await popup.getByRole('switch', { name: 'Enabled', exact: true }).check();
     await other.locator('.mbgc-personalisation').waitFor();
-    await appearance.selectOption('native');
+    await appearance.selectOption('light');
     await other.locator('html[data-mbgc-native-dark]').waitFor({ state: 'detached' });
     await other.close();
     await context.close();
@@ -1072,7 +1073,7 @@ test('GradeLens visual layout, outline navigation icons, browser zoom and accent
       const [tab] = await chrome.tabs.query({ url: 'https://uia.managebac.com/student/*' });
       await chrome.tabs.setZoom(tab.id, 1);
     });
-    for (const [theme, accent] of Object.entries({ blue: '41 105 201', orange: '184 77 17', red: '173 50 63', plum: '112 76 156', teal: '0 125 119' })) {
+    for (const [theme, accent] of Object.entries({ blue: '20 112 239', orange: '219 105 3', red: '217 45 33', plum: '93 52 96', teal: '2 133 125' })) {
       await page.evaluate((theme) => {
         document.documentElement.style.removeProperty('--primary-color');
         document.body.dataset.theme = theme;
@@ -1092,6 +1093,162 @@ test('GradeLens visual layout, outline navigation icons, browser zoom and accent
     assert.ok(await page.locator('.mbgc-page').evaluate((node) => node.scrollWidth <= node.clientWidth + 1));
   } finally {
     await context.close();
+    await fs.rm(profile, { recursive: true, force: true });
+  }
+});
+
+test('v1.22 shared appearance, exact accents and single clipped navigation treatment', { timeout: 42000 }, async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-schemes-'));
+  const markup = await fixture('native-appearance');
+  const tasks = await fixture('class-tasks');
+  const physics = tasks.replaceAll('/classes/123', '/classes/456')
+    .replaceAll('Mathematics Higher Level, Statistics and Mathematical Investigation', 'Physics');
+  const screenshots = process.env.MBGC_THEME_SCREENSHOTS;
+  const nativeTasks = '/student/tasks_and_deadlines';
+  const personal = '/student/settings/personalisation';
+  const dashboard = '/student/dashboard';
+  const pages = {
+    [dashboard]: '<h1>Dashboard</h1><div class="columns"><section class="widget"><header class="widget-header panel-heading">Today</header><div class="widget-body" style="background:#fff"><strong>Mathematics</strong><p class="text-muted">11:00 AM · Room 204</p></div></section><section class="panel"><header class="panel-heading">My classes</header><div class="panel-body"><a href="/student/classes/123">Mathematics</a></div></section></div>',
+    [nativeTasks]: '<h1>Tasks &amp; Deadlines</h1><section class="panel"><h2 class="panel-heading">Upcoming tasks</h2><div class="panel-body bg-white" style="background:#fff"><input class="form-control" type="search" placeholder="Search tasks"><table class="table"><thead><tr><th>Assessment</th><th>Due</th></tr></thead><tbody><tr><td>Practice exercises</td><td>Friday</td></tr></tbody></table><p class="text-danger">Submission pending</p></div></section>',
+    '/student/calendar': '<h1>Calendar</h1><section class="card"><div class="card-body"><table class="fc"><thead><tr><th class="fc-col-header-cell">Monday</th><th class="fc-col-header-cell">Tuesday</th></tr></thead><tbody><tr><td class="fc-daygrid-day fc-day-today"><a class="fc-event" href="/student/calendar">Physics tutorial</a></td><td class="fc-daygrid-day">Study period</td></tr></tbody></table></div></section>',
+    [personal]: '<h1>Personalisation</h1><div class="panel"><div class="panel-heading">Preferences</div><div class="panel-body" style="background:#fff"><label>Display name <input type="text" class="form-control" value="Student"></label><button class="btn-primary">Save native preferences</button></div></div>'
+  };
+  let context, worker;
+  async function launch() {
+    context = await chromium.launchPersistentContext(profile, {
+      ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+      args: ['--disable-extensions-except=' + root, '--load-extension=' + root], viewport: { width: 1200, height: 880 }
+    });
+    context.setDefaultTimeout(7000);
+    await context.route(host + '/**', (route) => {
+      const { pathname } = new URL(route.request().url());
+      const body = pages[pathname] ? markup.replace('__CONTENT__', pages[pathname])
+        .replace('class="nav-item" href="' + pathname, 'class="nav-item active" aria-current="page" href="' + pathname) : pathname === physicsPath ? physics : tasks;
+      return route.fulfill({ contentType: 'text/html', body });
+    });
+    worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+  }
+  const exact = {
+    orange: ['255, 250, 234', '219, 105, 3'], blue: ['239, 248, 255', '20, 112, 239'],
+    teal: ['235, 247, 243', '2, 133, 125'], red: ['254, 243, 242', '217, 45, 33'],
+    plum: ['249, 245, 249', '93, 52, 96']
+  };
+  const nativeDark = 'html[data-mbgc-native-dark]';
+  const snap = async (page, name, locator) => {
+    if (!screenshots) return;
+    const file = path.join(screenshots, name + '.png');
+    await (locator ?? page).screenshot({ path: file, animations: 'disabled' });
+  };
+  try {
+    await launch();
+    await worker.evaluate(() => chrome.storage.local.set({ 'mbgc:preferences': { refreshMinutes: 0, welcomeSeen: true } }));
+    const page = await context.newPage();
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.goto(host + personal);
+    const appearance = page.locator('.mbgc-personalisation').getByLabel('Appearance');
+    assert.deepEqual(await appearance.locator('option').allTextContents(), ['Follow System', 'Light', 'Dark']);
+    await appearance.selectOption('system');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.locator(nativeDark).waitFor();
+    await appearance.selectOption('light');
+    await page.locator(nativeDark).waitFor({ state: 'detached' });
+    assert.equal(await page.locator('main .panel-body').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(255, 255, 255)');
+    await appearance.selectOption('dark');
+    await page.locator(nativeDark).waitFor();
+    await page.emulateMedia({ colorScheme: 'light' });
+    const route = async (url, theme) => {
+      await page.goto(host + url);
+      await page.locator(nativeDark).waitFor();
+      await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+      await page.waitForFunction((rgb) => document.documentElement.style.getPropertyValue('--mbgc-native-accent') === 'rgb(' + rgb.replaceAll(',', '') + ')', exact[theme][1]);
+    };
+    await route(dashboard, 'orange');
+    assert.equal(await page.locator('.widget-body').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(29, 35, 44)');
+    await snap(page, '01-orange-dark-dashboard');
+    await route(nativeTasks, 'orange');
+    assert.equal(await page.locator('.panel-body').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(29, 35, 44)');
+    assert.equal(await page.locator('input[type=search]').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(25, 31, 40)');
+    assert.equal(await page.locator('.text-danger').evaluate((node) => getComputedStyle(node).color), 'rgb(255, 168, 178)');
+    await snap(page, '02-orange-dark-tasks');
+    await route('/student/calendar', 'blue');
+    assert.equal(await page.locator('.fc-event').evaluate((node) => getComputedStyle(node).backgroundColor), 'rgb(34, 85, 129)');
+    await snap(page, '03-blue-dark-calendar');
+    await route(personal, 'teal');
+    assert.equal(await appearance.inputValue(), 'dark');
+    await snap(page, '04-teal-dark-personalisation');
+    await route(physicsPath, 'plum');
+    await page.locator('.mbgc-compact .mbgc-numeral').waitFor();
+    await route(tasksPath, 'plum');
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    const skip = page.getByRole('button', { name: 'Skip guide' });
+    if (await skip.isVisible()) await skip.click();
+    await page.locator('.mbgc-subject-grade .mbgc-numeral', { hasText: '%' }).first().waitFor();
+    await snap(page, '05-plum-dark-grades');
+
+    const base = worker.url().split('/src/')[0];
+    const popup = await context.newPage();
+    await popup.goto(base + '/popup.html');
+    const popupAccent = (accent, mode) => popup.waitForFunction(([accent, mode]) =>
+      document.documentElement.dataset.theme === mode &&
+      document.documentElement.style.getPropertyValue('--mbgc-accent') === 'rgb(' + accent.replaceAll(',', '') + ')', [accent, mode]);
+    await popupAccent(exact.plum[1], 'dark');
+    await popup.getByText('Appearance', { exact: true }).click();
+    await popup.getByLabel('Color mode').selectOption('light');
+    await page.locator(nativeDark).waitFor({ state: 'detached' });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'red'; });
+    await popupAccent(exact.red[1], 'light');
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    await page.locator('.mbgc-prediction-comparison').waitFor();
+    await snap(page, '06-red-light-estimator');
+    // Native and extension routes each own one stripe, even with native pseudo-elements.
+    await page.goto(host + nativeTasks);
+    await page.locator('[data-mbgc-nav-native]').waitFor();
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    for (const [theme, [highlight, accent]] of Object.entries(exact)) {
+      await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+      const active = page.locator('.mbgc-nav[aria-current="page"]');
+      await page.waitForFunction((highlight) => getComputedStyle(document.querySelector('.mbgc-nav[aria-current="page"]')).backgroundColor ===
+        'rgb(' + highlight + ')', highlight);
+      const box = await active.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return [style.borderInlineStartColor, style.borderInlineStartWidth, style.borderRadius, style.boxShadow,
+          getComputedStyle(node, '::before').content, getComputedStyle(node, '::after').content,
+          getComputedStyle(node.parentElement, '::before').content];
+      });
+      assert.deepEqual(box, ['rgb(' + accent + ')', '2px', '6px', 'none', 'none', 'none', 'none']);
+      assert.equal(await active.count(), 1);
+      assert.deepEqual(await page.locator('.sidebar a:not(.mbgc-nav[aria-current="page"])').evaluateAll((links) =>
+        links.map((link) => getComputedStyle(link, '::before').content).filter((content) => content !== 'none')), []);
+      assert.equal(await page.locator('[data-mbgc-nav-native]').count(), 0);
+      await snap(page, 'sidebar-' + theme, page.locator('.sidebar'));
+    }
+    for (const zoom of [0.8, 1.25, 1.5, 1]) {
+      await worker.evaluate(async ({ nativeTasks, zoom }) => {
+        const tabs = await chrome.tabs.query({ url: 'https://uia.managebac.com/student/*' });
+        const tab = tabs.find((tab) => tab.url.includes(nativeTasks + '#mbgc-overall-grades'));
+        await chrome.tabs.setZoom(tab.id, zoom);
+      }, { nativeTasks, zoom });
+      const active = page.locator('.mbgc-nav[aria-current="page"]');
+      assert.equal(await active.evaluate((node) => getComputedStyle(node).boxShadow), 'none');
+      assert.equal(await active.evaluate((node) => node.getBoundingClientRect().right <=
+        node.closest('.sidebar').getBoundingClientRect().right), true);
+    }
+    await page.goBack();
+    await page.locator('[data-mbgc-nav-native]').waitFor();
+    assert.equal(await page.locator('.mbgc-nav[aria-current="page"]').count(), 0);
+    await page.goForward();
+    await page.locator('.mbgc-nav[aria-current="page"]').waitFor();
+    await popup.getByLabel('Color mode').selectOption('dark');
+    await page.locator(nativeDark).waitFor();
+    await context.close();
+    await launch();
+    const reopened = await context.newPage();
+    await reopened.emulateMedia({ colorScheme: 'light' });
+    await reopened.goto(host + personal);
+    await reopened.locator(nativeDark).waitFor();
+    assert.equal(await reopened.locator('.mbgc-personalisation').getByLabel('Appearance').inputValue(), 'dark');
+  } finally {
+    await context?.close();
     await fs.rm(profile, { recursive: true, force: true });
   }
 });
