@@ -263,7 +263,7 @@
     if (panel) {
       card.remove();
       mountDashboard();
-      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.refreshing, sync.message, sync.diagnostics, sync.storageState, sync.account, [...changed]]);
+      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.refreshing, sync.message, sync.diagnostics, sync.storageState, sync.account, sync.identityStatus, [...changed]]);
       if (force || viewKey !== contentKey) {
         const editor = stageHost.shadowRoot?.activeElement ?? document.activeElement;
         if (!force && editor?.matches('textarea') && stage.contains(editor)) return;
@@ -356,7 +356,7 @@
   const gradeRoots = [app.selectors.tasks, app.selectors.score, app.selectors.points, app.selectors.letter, app.selectors.rubric].join(',');
   const chartRoots = 'canvas,svg,[data-chart],.chart-frame,.highcharts-container';
   const relevant = [gradeRoots, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
-    app.discoveryLinks, 'a[href*="/core_tasks/"],a[href*="/tasks/"]', 'table,thead,h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4,.title',
+    app.discoveryLinks, app.accountLinks, 'a[href*="/core_tasks/"],a[href*="/tasks/"]', 'table,thead,h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4,.title',
     '[data-task-list],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
   const structure = relevant + ',main,[role="main"],#content,[data-all-tasks]';
   const scoreAttributes = new Set(['data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade']);

@@ -189,9 +189,13 @@
     return { id: null, label: 'Unidentified term' };
   }
 
-  function account(doc, url) {
-    const links = doc.querySelectorAll('header a[href], nav a[href], [role="banner"] a[href], [data-account-menu] a[href], aside a[href], [role="menu"] a[href], .dropdown-menu a[href]');
+  const accountNavigationLinks = 'header a[href],nav a[href],[role="banner"] a[href],[data-account-menu] a[href],aside a[href],[role="menu"] a[href],.dropdown-menu a[href]';
+  const accountLinks = 'a[href*="/student/profile"],a[href*="/student/students/"],[data-account-menu]';
+  const selfProfileLabel = /\b(my profile|manage (?:your )?profile|edit (?:my |your )?profile)\b/i;
+
+  function accountEvidence(doc, url) {
     const ids = new Set();
+    let profile = false;
     for (const meta of doc.querySelectorAll('meta[name="current-student-id"], meta[name="current-user-id"], meta[name="current_student_id"], meta[name="current_user_id"]')) {
       const value = meta.getAttribute('content');
       if (/^\d+$/.test(value)) ids.add(value);
@@ -200,14 +204,20 @@
       const value = marker.getAttribute('data-current-student-id') || marker.getAttribute('data-current-user-id');
       if (/^\d+$/.test(value)) ids.add(value);
     }
-    for (const link of links) {
-      const destination = localURL(link.getAttribute('href'), url);
-      const match = destination?.pathname.match(/^\/student\/(?:profiles?|students)\/(\d+)(?:\/edit)?\/?$/);
+    for (const link of doc.querySelectorAll(accountNavigationLinks)) {
       const purpose = [txt(link), link.getAttribute('aria-label'), link.getAttribute('title')].filter(Boolean).join(' ');
-      if (match && /\b(my profile|manage (?:your )?profile|edit (?:my |your )?profile)\b/i.test(purpose)) ids.add(match[1]);
+      if (!selfProfileLabel.test(purpose)) continue;
+      const destination = localURL(link.getAttribute('href'), url);
+      if (!destination) continue;
+      profile = true;
+      const match = destination.pathname.match(/^\/student\/(?:profiles?|students)\/(\d+)(?:\/edit)?\/?$/);
+      if (match) ids.add(match[1]);
     }
-    return ids.size === 1 ? [...ids][0] : null;
+    return { id: ids.size === 1 ? [...ids][0] : null,
+      status: ids.size > 1 ? 'conflicting' : ids.size === 1 ? 'verified' : profile ? 'profile-without-id' : 'missing' };
   }
+
+  const account = (doc, url) => accountEvidence(doc, url).id;
 
   function readWeights(doc) {
     const table = doc.querySelector(selectors.weights) ?? [...doc.querySelectorAll('table')].find((candidate) => {
@@ -570,5 +580,5 @@
     };
   }
 
-  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks });
+  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks });
 })();

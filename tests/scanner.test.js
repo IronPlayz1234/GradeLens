@@ -344,13 +344,18 @@ test('uses self-profile links in account menus and requires unambiguous identity
   const link = doc.querySelector('header a');
   doc.querySelector('main').append(link);
   assert.equal(app.account(doc, tasksURL), null);
+  assert.equal(app.accountEvidence(doc, tasksURL).status, 'missing');
   const menu = doc.createElement('div');
   menu.setAttribute('role', 'menu');
   menu.append(link);
   doc.body.append(menu);
   assert.equal(app.account(doc, tasksURL), '9');
+  link.setAttribute('href', '/student/profile');
+  assert.equal(app.accountEvidence(doc, tasksURL).status, 'profile-without-id');
+  link.setAttribute('href', '/student/profile/9');
   doc.body.setAttribute('data-current-student-id', '11');
   assert.equal(app.account(doc, tasksURL), null);
+  assert.equal(app.accountEvidence(doc, tasksURL).status, 'conflicting');
 });
 
 test('background parser identifies a still-rendered previous term under the new selector', () => {

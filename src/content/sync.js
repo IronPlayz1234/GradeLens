@@ -150,7 +150,9 @@
           return;
         }
       }
-      const detected = app.account(document, url);
+      const evidence = app.accountEvidence(document, url);
+      this.identityStatus = evidence.status;
+      const detected = evidence.id;
       if (detected && this.documentAccount && detected !== this.documentAccount) this.accountChanged = true;
       if (detected && !this.documentAccount) this.documentAccount = detected;
       await this.identify(this.accountChanged ? null : detected);

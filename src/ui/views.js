@@ -86,6 +86,14 @@
       sync.storageState === 'unavailable' ? 'Grade cache unavailable · current document only' :
         'Current document only · student identity could not be verified';
     details.append(h('p', 'mbgc-muted', storage));
+    if (!sync.account && sync.identityStatus) {
+      const reason = {
+        conflicting: 'The page exposed conflicting account identifiers.',
+        'profile-without-id': 'The profile menu was found, but its link did not expose a recognized student ID.',
+        missing: 'No account identifier or self-profile link was detected. Open the ManageBac avatar menu and check again.'
+      }[sync.identityStatus];
+      if (reason) details.append(h('p', 'mbgc-muted', reason));
+    }
     if (report && !report.failed && ['tasks', 'workspace'].includes(report.page)) {
       details.append(h('p', 'mbgc-muted',
         `${report.parsed} assessments read of ${report.candidates} candidates · ${report.points} with usable points · ${report.scoreIssues} with missing or invalid points · ${report.weights} category weights`),
