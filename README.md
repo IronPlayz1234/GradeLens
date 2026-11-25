@@ -1,4 +1,8 @@
-# GradeLens — for ManageBac
+# GradeLens
+
+Originally released as **ManageBac Grade Calculator**. The first build was v1.0.0. The extension adopted the GradeLens name in v1.21.
+
+Download the current build from [GitHub Releases](https://github.com/IronPlayz1234/GradeLens/releases/latest). The [release archive](https://github.com/IronPlayz1234/GradeLens/releases) contains installable ZIPs for the historical versions.
 
 A private Chrome extension for students at `uia.managebac.com`. It adds **Overall Grades** and **Grade Estimator** below **My Workspace → Tasks & Deadlines**. Class Overview gets a compact grade card, and Class Tasks gets a second card inside **All Tasks**, above the native charts.
 
