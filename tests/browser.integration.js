@@ -1882,3 +1882,134 @@ test('computed dark mode repairs unfamiliar and dynamically inserted native pain
     await fs.rm(profile, { recursive: true, force: true });
   }
 });
+
+test('Goal Planner edits, stores and reopens a term-specific plan with current grade data', { timeout: 45000 }, async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-goal-planner-'));
+  const base = (await fixture('class-tasks')).replace('<html lang="en"', '<html data-theme="plum" lang="en"')
+    .replace('<li><a href="/student/tasks_and_deadlines">', '<li><a class="workspace-row" href="/student/tasks_and_deadlines">')
+    .replace('  .shell {', '  aside nav ul a.workspace-row { background: white !important; }\n  .shell {');
+  let context;
+  let corrected = false;
+  async function open() {
+    context = await chromium.launchPersistentContext(profile, {
+      ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+      args: ['--disable-extensions-except=' + root, '--load-extension=' + root],
+      viewport: { width: 1120, height: 900 }
+    });
+    context.setDefaultTimeout(7000);
+    await context.route(host + '/**', async (entry) => {
+      const url = new URL(entry.request().url());
+      let content = '<header><a href="/student/profile/9">Manage Your Profile</a></header><main>Workspace</main>';
+      if (url.pathname === tasksPath || url.pathname === physicsPath) {
+        content = corrected ? base.replace('8 / 10 pts', '9 / 10 pts') : base;
+        if (url.pathname === physicsPath) content = content.replaceAll('/classes/123', '/classes/456')
+          .replaceAll('Mathematics Higher Level, Statistics and Mathematical Investigation', 'Physics');
+        if (url.searchParams.get('term_id') === '72') content = content.replace('value="71" selected', 'value="71"')
+          .replace('value="72">', 'value="72" selected>').replace('data-term-id="71"', 'data-term-id="72"');
+      }
+      await entry.fulfill({ body: content, contentType: 'text/html' });
+    });
+    return context.newPage();
+  }
+  const background = (locator) => locator.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const setAppearance = (appearance) => context.serviceWorkers()[0].evaluate(async (appearance) => {
+    const key = 'mbgc:preferences';
+    const current = (await chrome.storage.local.get(key))[key];
+    await chrome.storage.local.set({ [key]: { ...current, appearance, refreshMinutes: 0, welcomeSeen: true } });
+    await MBGC.refreshAppearancePrimer();
+  }, appearance);
+
+  try {
+    let page = await open();
+    if (!context.serviceWorkers().length) await context.waitForEvent('serviceworker');
+    await setAppearance('dark');
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact .mbgc-numeral').getByText('74.50%').waitFor();
+    for (const name of ['Overall Grades', 'Grade Estimator']) {
+      const nav = page.getByRole('link', { name, exact: true });
+      await nav.and(page.locator('[data-theme="dark"]')).waitFor();
+      await nav.hover();
+      assert.equal(await background(nav), 'rgb(48, 61, 76)');
+      await page.mouse.move(700, 30);
+      assert.equal(await background(nav), 'rgb(25, 31, 39)');
+    }
+
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    await page.getByRole('button', { name: 'Try a future grade' }).waitFor();
+    await page.getByRole('tab', { name: 'Try a Grade' }).press('ArrowRight');
+    await page.getByRole('heading', { name: 'Grade Goal Planner' }).waitFor();
+    await page.getByLabel('Goal target type').selectOption('letter');
+    await page.getByLabel('Goal letter grade').selectOption('A');
+    for (let i = 0; i < 3; i++) await page.getByRole('button', { name: 'Add assessment' }).click();
+    await page.getByLabel('Assessment 1 maximum points').fill('50');
+    await page.getByLabel('Assessment 2 maximum points').fill('40');
+    await page.getByLabel('Assessment 3 category').selectOption('Research');
+    await page.getByLabel('Assessment 3 maximum points').fill('20');
+    await page.getByLabel('Assessment 3 fixed score').fill('19');
+    await page.getByRole('heading', { name: 'Achievable', exact: true }).waitFor();
+    await page.locator('.mbgc-goal-result').getByText('96.67%', { exact: true }).waitFor();
+    await page.locator('.mbgc-goal-result').getByText('49 / 50', { exact: true }).waitFor();
+    const screenshots = process.env.MBGC_AUDIT_SCREENSHOTS;
+    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'goal-planner-dark.png'), fullPage: true });
+    await page.getByText('Show calculation', { exact: true }).click();
+    await page.getByText(/Proofs portfolio: 15/).waitFor();
+
+    await page.getByLabel('Assessment 3 fixed score').fill('21');
+    await page.getByText(/Check each assessment/).first().waitFor();
+    assert.ok(await page.getByRole('button', { name: 'Save plan' }).isDisabled());
+    await page.getByLabel('Assessment 3 fixed score').fill('19');
+    await page.getByLabel('Plan name').fill('Winter target');
+    await page.getByRole('button', { name: 'Save plan' }).click();
+    await page.getByText('Plan saved.', { exact: true }).waitFor();
+
+    await page.getByLabel('Subject calculation method').selectOption('points');
+    await page.getByText('Grade data or calculation settings changed since this plan was saved.', { exact: false }).waitFor();
+    await page.locator('.mbgc-goal-result').getByText('91.20%', { exact: true }).waitFor();
+    await page.setViewportSize({ width: 600, height: 880 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    await page.getByRole('tab', { name: 'Saved Plans' }).click();
+    await page.getByRole('button', { name: 'Open plan Winter target' }).waitFor();
+    assert.equal((await page.locator('a.mbgc-nav').count()), 2);
+    await context.close();
+
+    corrected = true;
+    page = await open();
+    await setAppearance('light');
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact .mbgc-numeral').getByText('73.00%', { exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    await page.getByRole('tab', { name: 'Saved Plans' }).click();
+    await page.getByRole('button', { name: 'Open plan Winter target' }).click();
+    assert.equal(await page.getByLabel('Assessment 3 fixed score').inputValue(), '19');
+    if (screenshots) await page.screenshot({ path: path.join(screenshots, 'goal-planner-light.png'), fullPage: true });
+    await page.getByText('Grade data or calculation settings changed since this plan was saved.', { exact: false }).waitFor();
+    await page.getByLabel('Plan name').fill('Updated winter target');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await page.getByText('Plan saved.', { exact: true }).waitFor();
+    await page.getByRole('tab', { name: 'Try a Grade' }).click();
+    await page.getByRole('button', { name: 'Try a future grade' }).waitFor();
+
+    await page.goto(host + physicsPath);
+    await page.locator('.mbgc-compact .mbgc-numeral').filter({ hasText: '%' }).waitFor();
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    const subject = page.getByLabel('Subject', { exact: true });
+    await subject.selectOption('456');
+    await page.getByRole('tab', { name: 'Saved Plans' }).click();
+    await page.getByText('No plans saved for this subject and term yet.').waitFor();
+    await subject.selectOption('123');
+    await page.getByRole('button', { name: 'Open plan Updated winter target' }).waitFor();
+
+    await page.goto(host + tasksPath + '?term_id=72');
+    await page.locator('.mbgc-compact').getByText(/Semester 2/).first().waitFor();
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    await page.getByRole('tab', { name: 'Saved Plans' }).click();
+    await page.getByText('No plans saved for this subject and term yet.').waitFor();
+    await page.getByLabel('Academic term').selectOption('term:71');
+    await page.getByRole('button', { name: 'Delete plan Updated winter target' }).click();
+    await page.getByRole('button', { name: 'Confirm deletion of Updated winter target' }).click();
+    await page.getByText('No plans saved for this subject and term yet.').waitFor();
+  } finally {
+    await context?.close();
+    await fs.rm(profile, { recursive: true, force: true });
+  }
+});

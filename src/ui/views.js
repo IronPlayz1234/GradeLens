@@ -609,12 +609,17 @@
       view.term === app.currentTerms ? item.terms[app.classTermKey(item)] : item.terms[view.term])
       .map(([id, item]) => [id, item.name || 'Class ' + id]).sort(([, a], [, b]) => a.localeCompare(b));
     const page = h('div', 'mbgc-page', header(sync, 'estimator', view, handlers, termOptions));
+    const section = h('div', 'mbgc-estimator-panel');
+    section.id = 'mbgc-estimator-panel';
+    section.setAttribute('role', 'tabpanel');
+    section.setAttribute('aria-labelledby', 'mbgc-estimator-tab-' + (view.estimatorTab ?? 'try'));
+    page.append(app.estimatorTabs(view, handlers), section);
     if (!subjects.some(([id]) => id === view.classId)) {
       view.classId = subjects[0]?.[0];
       view.scenario = null;
     }
     if (!view.classId) {
-      page.append(empty('No subjects ready to model', 'Sync graded assessments and category weights in Class Tasks, then choose a confirmed term.', 'estimator'));
+      section.append(empty('No subjects ready to model', 'Sync graded assessments and category weights in Class Tasks, then choose a confirmed term.', 'estimator'));
       return page;
     }
     const choice = select(subjects, view.classId, (id) => {
@@ -622,7 +627,7 @@
       view.scenario = null;
       handlers.render();
     });
-    page.append(h('section', 'mbgc-estimator-subject', h('h2', '', 'Choose a subject'),
+    section.append(h('section', 'mbgc-estimator-subject', h('h2', '', 'Choose a subject'),
       field('Subject', choice), subjectMethod(sync, view.classId)));
     const selectedKey = view.term === app.currentTerms ? app.classTermKey(sync.cache.classes[view.classId]) : view.term;
     if (view.scenarioTerm !== selectedKey) {
@@ -631,8 +636,12 @@
     }
     const data = gradeData(sync, view.classId, selectedKey);
     const categories = Object.keys(data.weights).filter((category) => data.weights[category] > 0);
+    if (view.estimatorTab && view.estimatorTab !== 'try') {
+      section.append(app.goalPlanner(sync, view, handlers, data));
+      return page;
+    }
     if (!data.verified || !categories.length) {
-      page.append(empty(data.result.percentage === null ? 'No grade available' : 'This subject needs more information',
+      section.append(empty(data.result.percentage === null ? 'No grade available' : 'This subject needs more information',
         data.verified ? 'Sync category weights in Class Tasks or add them under Overall Grades → Settings.' :
           'Identify the academic term in Class Tasks before modeling this subject.', 'estimator'));
       return page;
@@ -856,7 +865,7 @@
     const saved = disclosure('Saved predictions' + (model.entries.length ? ` (${model.entries.length})` : ''), 'scenariosOpen',
       model.entries.length ? scenarios : h('p', 'mbgc-muted', 'Choose Add to prediction to save a score and try another.'),
       h('div', 'mbgc-actions', button('Reset', () => { view.scenario = defaults(); handlers.render(); })));
-    page.append(
+    section.append(
       h('div', 'mbgc-estimator-grid',
         h('section', 'mbgc-panel mbgc-model',
           h('div', 'mbgc-panel-heading', h('h2', '', 'Try a grade')),
@@ -873,5 +882,5 @@
     update();
     return page;
   }
-  Object.assign(app, { h, icon, button, gradeData, compact, dashboard, patchDashboard, estimator, appearanceField });
+  Object.assign(app, { h, icon, button, gradeData, compact, dashboard, patchDashboard, estimator, appearanceField, field, select, numericInput, percent, number, time, gradeNotice });
 })();

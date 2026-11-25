@@ -1,4 +1,4 @@
-importScripts('core/grades.js', 'core/cache.js', 'repository.js', 'appearance-registry.js');
+importScripts('core/grades.js', 'core/goal-planner.js', 'core/cache.js', 'repository.js', 'appearance-registry.js');
 
 const app = globalThis.MBGC;
 const origin = 'https://uia.managebac.com';
@@ -77,6 +77,31 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!account) throw new Error('A student account was not identified.');
     const key = `mbgc:cache:${new URL(origin).host}:${account}`;
     const overrideKey = `mbgc:overrides:${new URL(origin).host}:${account}`;
+    if (message.type === 'mbgc:goal-plans') {
+      const storageKey = `mbgc:goal-plans:${new URL(origin).host}:${account}`;
+      const saved = (await chrome.storage.local.get(storageKey))[storageKey] ?? [];
+      if (message.operation === 'list') return saved;
+      const index = saved.findIndex((plan) => plan.id === message.plan?.id);
+      const previous = saved[index];
+      if (message.operation === 'delete') {
+        if (!previous || previous.revision !== message.plan.revision) throw new Error('This plan changed in another tab. Reopen Saved Plans and try again.');
+        saved.splice(index, 1);
+      } else if (message.operation === 'save') {
+        const plan = app.normalizedGoalPlan(message.plan);
+        if (previous ? (previous.revision !== message.plan.revision || previous.classId !== plan.classId || previous.termId !== plan.termId) :
+            message.plan.revision != null) throw new Error('This plan changed in another tab. Reopen Saved Plans and try again.');
+        const entry = { ...plan, updatedAt: Date.now(), revision: (previous?.revision ?? 0) + 1 };
+        if (previous) saved[index] = entry;
+        else {
+          if (saved.length >= 100) throw new Error('You can save up to 100 plans. Delete an older plan first.');
+          saved.push(entry);
+        }
+        await chrome.storage.local.set({ [storageKey]: saved });
+        return { saved, entry };
+      } else throw new Error('Unrecognized goal plan operation.');
+      await chrome.storage.local.set({ [storageKey]: saved });
+      return { saved };
+    }
     if (['mbgc:get', 'mbgc:clear', 'mbgc:scan'].includes(message.type)) {
       const state = await loadAccount(account);
       if (message.type === 'mbgc:clear') {

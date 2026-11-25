@@ -472,3 +472,74 @@ a > svg.mbgc-glyph, a > svg.mbgc-glyph > :is(path,rect,circle,line) {
   fill: none !important; stroke: currentColor !important; stroke-width: 1.8 !important;
   stroke-linecap: round !important; stroke-linejoin: round !important;
 }
+
+/* The injected links retain native sizing classes, so own their color pair. */
+html a.mbgc-owned.mbgc-nav[data-theme="dark"][data-mbgc-nav-row]:where(:not([aria-current="page"])) {
+  background: var(--mbgc-native-popover, #191f27) !important;
+  color: var(--mbgc-native-text, #e9eef5) !important;
+}
+html a.mbgc-owned.mbgc-nav[data-theme="dark"][data-mbgc-nav-row]:where(:not([aria-current="page"])):is(:hover,:focus-visible) {
+  background: var(--mbgc-native-hover, #303d4c) !important;
+}
+
+.mbgc-mode.mbgc-estimator-tabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 4px;
+  margin-block: 15px;
+  border: 1px solid var(--mbgc-border);
+  border-radius: var(--mbgc-radius);
+  background: var(--mbgc-surface);
+}
+.mbgc-owned .mbgc-estimator-tabs .mbgc-button {
+  background: transparent;
+  border-color: transparent;
+  white-space: normal;
+}
+.mbgc-owned .mbgc-estimator-tabs .mbgc-button[aria-selected="true"] {
+  background: var(--mbgc-tint);
+  color: var(--mbgc-ink);
+  font-weight: 700;
+}
+.mbgc-goal-card {
+  display: grid;
+  gap: 13px;
+  background: var(--mbgc-surface);
+  border: 1px solid var(--mbgc-border);
+  border-radius: var(--mbgc-radius);
+  padding: clamp(12px, 2.3vw, 24px);
+}
+.mbgc-goal-heading, .mbgc-goal-saved-row, .mbgc-goal-scores li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mbgc-goal-card h2 { font-size: 19px; }
+.mbgc-goal-card h3 { font-size: 15px; overflow-wrap: anywhere; }
+.mbgc-goal-card > .mbgc-button { justify-self: start; }
+.mbgc-goal-rows, .mbgc-goal-result { display: grid; gap: 10px; }
+.mbgc-goal-card :is(.mbgc-goal-assessment,.mbgc-goal-saved-row) {
+  padding: 10px 12px;
+  border: 1px solid var(--mbgc-border);
+  border-radius: var(--mbgc-radius);
+}
+.mbgc-goal-fields {
+  margin: 8px 0 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+}
+.mbgc-goal-result {
+  padding: 14px;
+  background: var(--mbgc-base);
+  border-radius: var(--mbgc-radius);
+}
+.mbgc-goal-metrics { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px),1fr)); }
+.mbgc-goal-metrics strong { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+.mbgc-goal-scores { list-style: none; margin: 0; padding: 0; }
+.mbgc-goal-scores li { border-block-start: 1px solid var(--mbgc-border); padding-block: 7px; }
+.mbgc-goal-scores .mbgc-muted { display: block; }
+.mbgc-goal-saver { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+.mbgc-goal-saver label { flex: 1 1 180px; }
+.mbgc-goal-breakdown ul { padding-inline-start: 20px; }
+.mbgc-goal-breakdown h4 { margin-block-start: 10px; }
+.mbgc-goal-announcement { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); }

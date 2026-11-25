@@ -307,6 +307,14 @@
       return this.savePreferences({ subject: { id, method } });
     }
 
+    async goalPlans(operation, plan) {
+      const account = this.account;
+      if (!account) throw new Error('Verify your student account before saving or loading plans.');
+      const response = await request('goal-plans', account, { operation, plan });
+      if (this.account !== account) throw new Error('The student account changed.');
+      return response;
+    }
+
     async setOverrides(patch) {
       const next = { ...this.overrides, ...patch };
       if (this.account) await chrome.storage.local.set({ [overrideKey(this.account)]: next });

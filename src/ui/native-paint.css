@@ -23,3 +23,19 @@ html[data-mbgc-native-dark] [data-mbgc-native-doodle] {
   background-size: 430px 430px !important;
   background-repeat: repeat !important;
 }
+
+/* These links inherit ManageBac classes that can carry a forced white fill. */
+html[data-mbgc-native-dark] li.mbgc-nav-shell {
+  background: transparent !important;
+}
+html[data-mbgc-native-dark] a.mbgc-nav[data-theme="dark"]:not([aria-current="page"]) {
+  background: var(--mbgc-native-popover) !important;
+  color: var(--mbgc-native-text) !important;
+}
+html[data-mbgc-native-dark] a.mbgc-nav[data-theme="dark"]:not([aria-current="page"]):is(:hover,:focus-visible) {
+  background: var(--mbgc-native-hover) !important;
+}
+html[data-mbgc-native-dark] a.mbgc-nav[data-theme="dark"][aria-current="page"] {
+  background: var(--mbgc-highlight, var(--mbgc-native-selection)) !important;
+  color: var(--mbgc-ink, var(--mbgc-native-ink)) !important;
+}

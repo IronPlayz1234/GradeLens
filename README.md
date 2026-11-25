@@ -27,6 +27,10 @@ Notification tables, timetable lessons, calendar events and weekends, workspace,
 
 ## Grades and what-if scenarios
 
+Open **Grade Estimator → Goal Planner** to test a percentage or letter-grade target across multiple future assessments. Set a category, maximum points, mark precision, and optional fixed score for each assessment. The planner uses the selected term and the subject’s saved calculation method. It shows the common percentage before rounding, checks the rounded suggested marks, and reports the best result available under the plan. Use **Show calculation** to see the category weights and records that contributed.
+
+**Saved Plans** stores named scenarios locally for the verified student account, subject, and term. Opening a plan reruns it against the latest available scores and identifies changes to scores or calculation settings since it was saved.
+
 - Expand a subject to search assessment titles and categories. Search only changes which rows are shown. Assessment links with a verified ManageBac task destination open in a new tab.
 - **Settings → Appearance** controls card density, decorative grade bars, and animation intensity. These choices are stored locally. The OS reduced-motion preference takes precedence. The welcome guide appears on new installations and can be reopened from Settings.
 

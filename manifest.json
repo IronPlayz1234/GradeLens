@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GradeLens \u2014 for ManageBac",
-  "version": "1.27",
+  "version": "1.28",
   "icons": {
     "16": "assets/icons/gradelens-16.png",
     "32": "assets/icons/gradelens-32.png",
@@ -67,11 +67,13 @@
       ],
       "js": [
         "src/core/grades.js",
+        "src/core/goal-planner.js",
         "src/core/cache.js",
         "src/content/scanner.js",
         "src/content/sync.js",
         "src/ui/icons.js",
         "src/ui/views.js",
+        "src/ui/goal-planner.js",
         "src/content/native-components.js",
         "src/content/index.js"
       ],
