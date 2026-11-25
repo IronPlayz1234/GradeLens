@@ -5,10 +5,12 @@ html[data-mbgc-native-dark] {
   --mbgc-native-surface: #1d232c;
   --mbgc-native-secondary: #242d38;
   --mbgc-native-elevated: #293441;
+  --mbgc-native-popover: #191f27;
   --mbgc-native-input: #191f28;
-  --mbgc-native-nav: #191f27;
+  --mbgc-native-nav: var(--mbgc-native-popover);
   --mbgc-native-text: #e9eef5;
-  --mbgc-native-muted: #becbd9;
+  --mbgc-native-secondary-text: #becbd9;
+  --mbgc-native-muted: #9baabd;
   --mbgc-native-border: #465465;
   --mbgc-native-hover: #303d4c;
   --mbgc-native-danger: #ffa8b2;
@@ -17,11 +19,11 @@ html[data-mbgc-native-dark] {
   --mbgc-native-info: #a8cdfb;
   --mbgc-native-link: var(--mbgc-native-ink, #a8cdfb);
   --mbgc-native-control: #202a36;
-  --mbgc-native-disabled: #9baabd;
+  --mbgc-native-disabled: var(--mbgc-native-muted);
   --mbgc-native-weekend: #19212b;
   --mbgc-native-stripe: #202a35;
   --mbgc-native-focus: var(--mbgc-native-ink, #a8cdfb);
-  background: var(--mbgc-native-bg);
+  background-color: var(--mbgc-native-bg) !important;
 }
 /* Paint foreground and background together at each surface boundary. */
 html[data-mbgc-native-dark] :where(body,main,[role="main"],#content,#main-content,.main-content,.content-wrapper,
@@ -59,7 +61,7 @@ html[data-mbgc-native-dark] :is(.modal-content,[role="dialog"],.dropdown-menu,.p
 html[data-mbgc-native-dark] body {
   --bs-body-bg: var(--mbgc-native-bg);
   --bs-body-color: var(--mbgc-native-text);
-  --bs-secondary-color: var(--mbgc-native-muted);
+  --bs-secondary-color: var(--mbgc-native-secondary-text);
   --bs-border-color: var(--mbgc-native-border);
   --bs-secondary-bg: var(--mbgc-native-secondary);
   --bs-tertiary-bg: var(--mbgc-native-surface);

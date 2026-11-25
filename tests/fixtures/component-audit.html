@@ -11,7 +11,12 @@ header.site { display:flex; justify-content:space-between; padding:14px 22px; ba
 .workspace-region { padding:16px 12px }
 .flyout { border:1px solid #cfd7e0; border-radius:9px; background:white; padding:9px; margin-bottom:12px }
 .flyout h3 { margin:0 0 5px; border-radius:5px; padding:6px; background:#fafafa; color:#43516a }
-.flyout ul { list-style:none; margin:0; padding:0 }
+.flyout ul { list-style:none; margin:0; padding:0; background:#fff }
+.flyout .option-list { background:#f7f8f9; border-radius:6px }
+.flyout .menu-label { color:#142237 }
+.flyout .list-viewport { background:#fff; border-radius:6px }
+.flyout .menu-symbol { color:#33465d; display:inline-flex; margin-right:5px }
+.flyout .menu-symbol svg { width:14px; height:14px }
 .flyout a { color:#24334a; text-decoration:none; display:block; padding:6px; border-radius:6px }
 .flyout a:hover:not(.mbgc-nav) { background:#f9f5f9; color:#e1e5ed }
 .flyout .menu-label { font-weight:400 }
@@ -58,19 +63,20 @@ input[type=search] { padding:5px; margin-bottom:8px }
 <div class="shell">
 <div class="workspace-region">
   <nav class="flyout" aria-label="My Workspace">
-    <h3>My Workspace</h3><ul>
+    <h3>My Workspace</h3><div class="list-viewport"><ul class="option-list">
       <li><a href="/student">My Workspace</a></li>
-      <li><a href="/student/calendar">Calendar</a></li>
+      <li><a href="/student/calendar"><span class="menu-symbol nav-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M2 6h12"/></svg></span><span class="menu-label">Calendar</span></a></li>
       <li><a href="/student/timetables">Timetables</a></li>
       <li><a href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a></li>
-    </ul>
+    </ul></div>
   </nav>
-  <aside class="flyout classes-flyout"><h3>Classes</h3>
+  <aside class="flyout classes-flyout"><h3>Classes</h3><div class="list-viewport"><div class="option-list">
     <a href="/student/classes/123"><span class="menu-label">Physics</span></a>
     <a href="/student/classes/456"><span class="menu-label">Mathematics</span></a>
+  </div></div>
   </aside>
   <aside class="flyout groups-flyout"><h3>Groups</h3>
-    <a href="/student/groups/22">Student council</a><a href="/student/groups">Browse All Groups</a>
+    <div class="list-viewport"><div class="option-list"><a href="/student/groups/22">Student council</a><a href="/student/groups">Browse All Groups</a></div></div>
   </aside>
 </div>
 <main id="content">__CONTENT__</main>

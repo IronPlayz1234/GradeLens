@@ -1395,7 +1395,7 @@ test('v1.23 pairs native surfaces with legible text and aligns the six workspace
   }
 });
 
-test('v1.24 native component audit covers pale fills, state contrast and restored light styling', { timeout: 50000 }, async () => {
+test('native component audit covers nested paint, state contrast and restored light styling', { timeout: 50000 }, async () => {
   const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-components-'));
   const context = await chromium.launchPersistentContext(profile, {
     ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
@@ -1410,14 +1410,15 @@ test('v1.24 native component audit covers pale fills, state contrast and restore
     [notifications]: '<h1>Notification Preferences</h1><table class="table table-striped"><thead><tr><th><span>Year Group</span></th><th>Web Notifications</th></tr></thead><tbody><tr><td><strong class="notification-title" style="color:#182435">Service Learning</strong><small class="notification-description">Notifications about worksheets.</small></td><td><input type="checkbox" checked aria-label="Service Learning"></td></tr><tr><td><strong class="notification-title">Events</strong><small class="notification-description">Announcements and deadlines.</small></td><td><input type="checkbox" aria-label="Events"></td></tr></tbody></table>',
     [timetable]: '<h1>Timetables Overview</h1><div class="timetable-toolbar"><button aria-label="Previous week">Previous</button><button aria-pressed="true">Week</button></div><div class="timetable panel"><table class="table"><thead><tr><th class="timetable-day">Tuesday</th><th class="timetable-day">Wednesday</th></tr></thead><tbody><tr><td><div class="slot"><a class="lesson-card" style="background:rgb(223,239,221)" href="#physics"><span class="badge">P</span><time>8:50 AM – 9:40 AM</time><strong class="lesson-name">Physics AS</strong><small class="room">Grade 11 · M301</small></a></div></td><td><div class="slot"><article class="lesson-card" style="background:#eef0f2"><strong>Chemistry AS</strong><small class="room">Lab 2</small></article></div></td></tr></tbody></table></div>',
     [calendar]: '<h1>Calendar</h1><div class="calendar-toolbar"><button aria-label="Previous month">Previous</button><button class="fc-button fc-button-active" aria-pressed="true">Month</button></div><table class="fc"><thead><tr><th class="fc-col-header-cell"><a class="fc-col-header-cell-cushion" href="#sunday" style="color:#43516a">Sunday</a></th><th class="fc-col-header-cell">Monday</th></tr></thead><tbody><tr><td class="fc-daygrid-day fc-day-sun" style="background:#f7f8fa"><a class="fc-daygrid-day-number" href="#date">1</a><a class="fc-event" style="background:#f0f1f4" href="#event"><time>8:00 AM</time><strong>Preparation task</strong></a></td><td class="fc-daygrid-day"><a class="fc-event" style="background:#225581;color:#fff" href="#tutorial"><strong>Physics tutorial</strong></a></td></tr></tbody></table>',
-    [groups]: '<h1>Browse All Groups (3)</h1><input class="form-control" type="search" placeholder="Search groups"><section class="panel"><article class="group-row"><strong class="group-name">House Captains</strong><span class="avatar">JA</span></article><article style="background:#fff" data-group-id="22"><a href="/student/groups/22" class="group-name">All students</a><span class="member-count">363 Members</span></article><nav class="pagination"><button aria-disabled="true">Previous</button><a href="#page" class="page-link" aria-current="page">1</a><a class="page-link" href="#next">Next</a></nav></section>',
+    [groups]: '<h1>Browse All Groups (3)</h1><input class="form-control" type="search" placeholder="Search groups"><section class="panel"><article class="group-row"><strong class="group-name">House Captains</strong><span class="avatar">JA</span></article><article style="background:#fff" data-group-id="22"><a href="/student/groups/22" class="group-name">All students</a><span class="member-count">363 Members</span></article><nav aria-label="Pagination" style="background:white"><button aria-disabled="true">Previous</button><a href="#page" class="page-link" aria-current="page">1</a><a class="page-link" href="#next">Next</a></nav></section>',
     [group]: '<h1>All students</h1><div class="banner-artwork" style="background-image:linear-gradient(120deg,#e3ffb4,#9dd14d);height:75px"></div><section class="panel"><h2>Latest Activity</h2><p>Group notices.</p></section>',
-    [overview]: '<h1>Physics AS</h1><div class="banner-artwork" style="background-image:linear-gradient(120deg,#ffdecf,#fdb99d);height:65px"></div><section id="latest-activity" class="panel"><h2>Latest Activity</h2><p>Class notices.</p><button class="show-more" style="background:#fff" onclick="this.dataset.clicked=true">Show More</button></section>',
+    [overview]: '<h1>Physics AS</h1><div class="banner-artwork" style="background-image:linear-gradient(120deg,#ffdecf,#fdb99d);height:65px"></div><section id="latest-activity" class="panel"><h2>Latest Activity</h2><p>Class notices.</p><div class="activity-action" style="background:#fff"><button class="show-more" style="background:#fff" onclick="this.dataset.clicked=true">Show More</button></div></section>',
     [personal]: '<h1>Personalisation</h1><section class="panel"><div class="guidance-banner"><strong>Guidance</strong><p>Choose your landing page.</p></div><div class="modal-content" role="dialog"><h2>Privacy Preferences</h2><p>Review cookie settings.</p><button class="btn-outline-secondary">Save Preferences</button></div><div class="tooltip-inner" role="tooltip">Theme preview</div><p class="empty-state">No additional preferences</p></section>'
   };
   const capture = async (page, key, mode) => {
     if (process.env.MBGC_AUDIT_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.MBGC_AUDIT_SCREENSHOTS, key + '-' + mode + '.png'), animations: 'disabled' });
   };
+  const accents = { orange: '219 105 3', blue: '20 112 239', teal: '2 133 125', red: '217 45 33', plum: '93 52 96' };
   const computed = (locator, property) => locator.evaluate((node, name) => getComputedStyle(node)[name], property);
   const contrast = (locator) => locator.evaluate((node) => {
     const value = (str) => str.match(/[\d.]+/g).map(Number);
@@ -1441,6 +1442,7 @@ test('v1.24 native component audit covers pale fills, state contrast and restore
     });
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
     const page = await context.newPage();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     const appearance = (mode) => worker.evaluate((appearance) => chrome.storage.local.set({
       'mbgc:preferences': { appearance, refreshMinutes: 0, welcomeSeen: true }
     }), mode);
@@ -1455,15 +1457,22 @@ test('v1.24 native component audit covers pale fills, state contrast and restore
         await page.locator('.mbgc-nav[data-theme="' + mode + '"]').first().waitFor();
         const dark = mode === 'dark';
         if (dark) await page.locator('.navigation-rail[data-mbgc-audit-part="menu"]').waitFor();
+        for (const menu of await page.locator('.flyout').all()) {
+          const body = menu.locator('.list-viewport');
+          const list = body.locator('.option-list');
+          assert.equal(await computed(body, 'backgroundColor'), dark ? 'rgb(25, 31, 39)' : 'rgb(255, 255, 255)');
+          assert.equal(await computed(list, 'backgroundColor'), dark ? 'rgb(25, 31, 39)' : 'rgb(247, 248, 249)');
+          assert.ok(await contrast(list.locator('a').first()) >= 4.5);
+        }
         const selected = page.locator('nav.flyout [data-mbgc-nav-native]');
         if ([timetable, calendar].includes(route)) {
           await selected.waitFor();
           assert.equal(await computed(selected, 'fontWeight'), '700');
-          for (const [theme, accent] of Object.entries({ orange: '219 105 3', blue: '20 112 239', teal: '2 133 125', red: '217 45 33', plum: '93 52 96' })) {
+          for (const [theme, accent] of Object.entries(accents)) {
             await page.evaluate((name) => { document.documentElement.dataset.theme = name; }, theme);
             await page.waitForFunction((accent) => document.documentElement.style.getPropertyValue('--mbgc-native-accent') === 'rgb(' + accent + ')', accent);
             assert.ok(await contrast(selected) >= 4.5, theme + ' selected row ' + mode);
-            assert.ok(await contrast(selected.locator('.mbgc-glyph')) >= 3, theme + ' icon ' + mode);
+            assert.ok(await contrast(selected.locator('.mbgc-glyph,.menu-symbol svg').first()) >= 3, theme + ' icon ' + mode);
             await selected.hover();
             assert.ok(await contrast(selected) >= 4.5, theme + ' selected hover ' + mode);
           }
@@ -1505,14 +1514,16 @@ test('v1.24 native component audit covers pale fills, state contrast and restore
           assert.equal(await computed(page.locator('[data-group-id]'), 'backgroundColor'), 'rgb(29, 35, 44)');
           assert.ok(await contrast(page.locator('.member-count')) >= 4.5);
           await page.locator('main .panel').evaluate((panel) => {
-            const row = document.createElement('article');
-            row.innerHTML = '<a href="/student/groups/24">Newly loaded group</a>';
+            const row = document.createElement('div');
+            row.innerHTML = '<a href="/student/groups/24">Newly loaded group</a><span class="member-count">48 Members</span>';
             row.style.backgroundColor = 'white';
             panel.append(row);
           });
-          const late = page.locator('article[data-mbgc-audit-part="group-row"]').filter({ hasText: 'Newly loaded group' });
+          const late = page.locator('[data-mbgc-audit-part="group-row"]').filter({ hasText: 'Newly loaded group' });
           await late.waitFor();
           assert.equal(await computed(late, 'backgroundColor'), 'rgb(29, 35, 44)');
+          assert.equal(await computed(page.getByRole('navigation', { name: 'Pagination' }), 'backgroundColor'), 'rgb(29, 35, 44)');
+          assert.ok(await contrast(page.getByRole('link', { name: '1', exact: true })) >= 4.5);
           const previous = page.getByRole('button', { name: 'Previous', exact: true });
           assert.equal(await previous.getAttribute('aria-disabled'), 'true');
           assert.notEqual(await computed(previous, 'color'), await computed(page.getByRole('link', { name: 'Next', exact: true }), 'color'));
@@ -1524,12 +1535,27 @@ test('v1.24 native component audit covers pale fills, state contrast and restore
           await page.locator('.account-menu').evaluate((node) => { node.dataset.open = ''; });
           if (dark) assert.ok(await contrast(page.locator('.profile-subtitle')) >= 4.5);
           assert.equal(await computed(page.locator('.groups-flyout'), 'backgroundColor'), dark ? 'rgb(25, 31, 39)' : 'rgb(255, 255, 255)');
+          const before = await computed(page.locator('main'), 'backgroundColor');
+          await page.evaluate(() => {
+            const portal = document.createElement('div');
+            portal.id = 'late-menu';
+            portal.style.cssText = 'background:white;position:absolute;top:110px;left:245px;padding:9px;border-radius:8px';
+            portal.innerHTML = '<div><h3>Groups</h3><div style="background:white"><ul style="background:#fafafa"><li><a href="/student/groups/28">Service group</a></li><li><a href="/student/groups" aria-disabled="true">More groups</a></li></ul></div></div>';
+            document.body.append(portal);
+          });
+          const portal = page.locator('#late-menu');
+          if (dark) await portal.and(page.locator('[data-mbgc-audit-part="menu"]')).waitFor();
+          assert.equal(await computed(portal, 'backgroundColor'), dark ? 'rgb(25, 31, 39)' : 'rgb(255, 255, 255)');
+          assert.equal(await computed(portal.locator('ul'), 'backgroundColor'), dark ? 'rgb(25, 31, 39)' : 'rgb(250, 250, 250)');
+          if (dark) assert.ok(await contrast(portal.getByText('More groups')) >= 4.5);
+          assert.equal(await computed(page.locator('main'), 'backgroundColor'), before);
         }
         if (route === overview) {
           const button = page.getByRole('button', { name: 'Show More' });
           if (dark) {
             await button.and(page.locator('[data-mbgc-audit-part="activity-more"]')).waitFor();
             assert.equal(await computed(button, 'backgroundColor'), 'rgb(32, 42, 54)');
+            assert.equal(await computed(page.locator('.activity-action'), 'backgroundColor'), 'rgb(29, 35, 44)');
             const grade = page.locator('.classes-flyout .mbgc-sidebar-grade').first();
             await grade.waitFor();
             assert.ok(await contrast(grade) >= 4.5);
@@ -1546,11 +1572,118 @@ test('v1.24 native component audit covers pale fills, state contrast and restore
           assert.ok(await contrast(page.getByRole('tooltip')) >= 4.5);
         }
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, key);
+        if (route === overview) {
+          for (const [accent, rgb] of Object.entries(accents)) {
+            await page.evaluate((name) => { document.documentElement.dataset.theme = name; }, accent);
+            await page.waitForFunction((value) => document.documentElement.style.getPropertyValue('--mbgc-native-accent') === 'rgb(' + value + ')', rgb);
+            const badge = page.locator('.classes-flyout .mbgc-sidebar-grade').first();
+            await badge.waitFor();
+            assert.ok(await contrast(badge) >= 4.5, accent + ' grade badge ' + mode);
+            if (dark) assert.ok(await contrast(page.locator('.classes-flyout [data-mbgc-audit-selected] .menu-label')) >= 4.5, accent + ' class selected ' + mode);
+            if (accent === 'plum' || accent === 'orange') await capture(page, key + '-' + accent, mode);
+          }
+        } else await capture(page, key, mode);
+      }
+      for (const [label, key] of [['Overall Grades', 'overall-grades'], ['Grade Estimator', 'grade-estimator']]) {
+        await page.getByRole('link', { name: label, exact: true }).click();
+        await page.getByRole('heading', { name: label, exact: true }).waitFor();
         await capture(page, key, mode);
+        await page.getByRole('button', { name: 'Back to ManageBac' }).click();
       }
     }
   } finally {
     await context.close();
     await fs.rm(profile, { recursive: true, force: true });
+  }
+});
+
+test('saved appearance is available at document start across navigation and browser restart', { timeout: 45000 }, async () => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-first-paint-'));
+  const copy = path.join(folder, 'extension');
+  const profile = path.join(folder, 'profile');
+  await fs.mkdir(copy);
+  for (const item of ['manifest.json', 'popup.html', 'src', 'assets']) {
+    await fs.cp(path.join(root, item), path.join(copy, item), { recursive: true });
+  }
+  // Give the parser a deterministic head start on the asynchronous read while
+  // leaving the extension's real CSS, registered scripts and worker in use.
+  const appearanceScript = path.join(copy, 'src/content/appearance.js');
+  const appearanceSource = await fs.readFile(appearanceScript, 'utf8');
+  const read = 'chrome.storage.local.get(key).then((stored) => {';
+  assert.ok(appearanceSource.includes(read));
+  await fs.writeFile(appearanceScript, appearanceSource.replace(read,
+    'chrome.storage.local.get(key).then((stored) => new Promise((resolve) => setTimeout(resolve, 500, stored))).then((stored) => {'));
+
+  const fixturePage = `<!doctype html><html style="background:white"><head><style>
+    body { background: white; color: #142237 }
+  </style></head><body><script>
+    function sample() {
+      return {
+        root: getComputedStyle(document.documentElement).backgroundColor,
+        body: getComputedStyle(document.body).backgroundColor,
+        theme: document.documentElement.getAttribute('data-mbgc-native-dark')
+      };
+    }
+    window.parserAppearance = sample();
+    requestAnimationFrame(() => { window.firstFrameAppearance = sample(); });
+  </script><main><h1>Student workspace</h1></main></body></html>`;
+  let browser;
+  async function open() {
+    browser = await chromium.launchPersistentContext(profile, {
+      ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }),
+      headless: true, colorScheme: 'light',
+      args: ['--disable-extensions-except=' + copy, '--load-extension=' + copy]
+    });
+    await browser.route(host + '/**', (route) => route.fulfill({ body: fixturePage, contentType: 'text/html' }));
+    return browser.newPage();
+  }
+  function worker() {
+    return browser.serviceWorkers()[0] ?? browser.waitForEvent('serviceworker', { timeout: 5000 });
+  }
+  async function setMode(appearance, enabled = true) {
+    await (await worker()).evaluate(async ({ appearance, enabled }) => {
+      await chrome.storage.local.set({ 'mbgc:preferences': { appearance, enabled, refreshMinutes: 0, welcomeSeen: true } });
+      await MBGC.refreshAppearancePrimer?.();
+    }, { appearance, enabled });
+  }
+  async function checkNavigation(page, route, dark) {
+    await page.goto(host + route);
+    const early = dark ? { root: 'rgb(21, 26, 33)', body: 'rgb(21, 26, 33)', theme: 'primed' }
+      : { root: 'rgb(255, 255, 255)', body: 'rgb(255, 255, 255)', theme: null };
+    assert.deepEqual(await page.evaluate(() => window.parserAppearance), early, route + ' parser');
+    await page.waitForFunction(() => window.firstFrameAppearance);
+    assert.deepEqual(await page.evaluate(() => window.firstFrameAppearance), early, route + ' first frame');
+  }
+
+  try {
+    let page = await open();
+    await setMode('dark');
+    for (const route of ['/student', '/student/groups', '/student/calendar', '/student/groups']) {
+      await checkNavigation(page, route, true);
+    }
+    const duringSPA = await page.evaluate(() => {
+      history.pushState({}, '', '/student/timetables');
+      return sample().root;
+    });
+    assert.equal(duringSPA, 'rgb(21, 26, 33)');
+    await browser.close();
+
+    page = await open();
+    await checkNavigation(page, '/student/calendar', true);
+
+    await setMode('dark', false);
+    await checkNavigation(page, '/student/groups', false);
+    await setMode('light');
+    await checkNavigation(page, '/student/calendar', false);
+
+    await setMode('system');
+    await checkNavigation(page, '/student/groups', false);
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await checkNavigation(page, '/student/calendar', true);
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.waitForFunction(() => !document.documentElement.hasAttribute('data-mbgc-native-dark'));
+  } finally {
+    await browser?.close();
+    await fs.rm(folder, { recursive: true, force: true });
   }
 });

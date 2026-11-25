@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GradeLens \u2014 for ManageBac",
-  "version": "1.24",
+  "version": "1.25",
   "icons": {
     "16": "assets/icons/gradelens-16.png",
     "32": "assets/icons/gradelens-32.png",
@@ -18,7 +18,8 @@
     "default_title": "GradeLens \u2014 for ManageBac"
   },
   "permissions": [
-    "storage"
+    "storage",
+    "scripting"
   ],
   "host_permissions": [
     "https://uia.managebac.com/*"

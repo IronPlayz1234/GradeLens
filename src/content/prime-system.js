@@ -1,0 +1,1 @@
+globalThis.MBGC?.primeNativeAppearance?.('system');

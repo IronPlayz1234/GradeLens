@@ -21,7 +21,9 @@ The popup also controls the master switch, individual placement and navigation t
 
 ## Native dark-mode component coverage
 
-Notification tables, timetable lessons, calendar events and weekends, workspace and classes flyouts, group directory rows, and class activity controls use component-specific styles in dark mode. GradeLens pairs readable text with timetable and event colors and keeps native attendance badges and artwork. Embedded pages, school-specific component markup, and charts outside the supported selectors may still use their native appearance.
+GradeLens registers its saved Dark or Follow System appearance with Chrome so the native page can paint in the chosen mode at document start. The registration is limited to the school’s student pages and persists across browser restarts. Light and disabled modes remove it.
+
+Notification tables, timetable lessons, calendar events and weekends, workspace, classes and groups flyouts, group directory rows and pagination, and class activity controls use component-specific styles in dark mode. Flyout shells, headers, and nested list surfaces are themed together, including menus inserted outside the main page. Timetable colors, attendance badges, and artwork retain their meaning. Embedded pages, school-specific component markup, and charts outside the supported structures may keep their native appearance.
 
 ## Grades and what-if scenarios
 

@@ -1,4 +1,4 @@
-importScripts('core/grades.js', 'core/cache.js', 'repository.js');
+importScripts('core/grades.js', 'core/cache.js', 'repository.js', 'appearance-registry.js');
 
 const app = globalThis.MBGC;
 const origin = 'https://uia.managebac.com';
@@ -54,6 +54,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const stored = (await chrome.storage.local.get(key))[key];
       const next = app.patchSettings(stored, message);
       if (JSON.stringify(stored) !== JSON.stringify(next)) await chrome.storage.local.set({ [key]: next });
+      const before = app.normalizeSettings(stored);
+      if (before.appearance !== next.appearance || before.enabled !== next.enabled) {
+        await app.refreshAppearancePrimer().catch(() => {});
+      }
       return next;
     }).then((value) => respond({ value }), () => respond({ error: 'Preferences could not be saved.' }));
     return true;
