@@ -610,3 +610,49 @@ test('render-only and linked results sync automatically and verified grades surv
     await fs.rm(userData, { recursive: true, force: true });
   }
 });
+
+test('generic self-profile scopes automatic grades and blocks a mid-refresh account switch', { timeout: 20000 }, async () => {
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-profile-identity-'));
+  const browser = await chromium.launchPersistentContext(userData, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root]
+  });
+  try {
+    const classPage = (await fixture('class-tasks')).replace('href="/student/profile/9"', 'href="/student/profile"')
+      .replace('<a href="/student/classes/456">Physics</a>', '');
+    const studentPage = (body) => '<header><a href="/student/profile">Manage Your Profile</a></header>' +
+      '<nav><a href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a></nav><main>' + body + '</main>';
+    let email = 'fixture-one@example.test';
+    let switchDuringRead = false;
+    await browser.route(host + '/**', (intercepted) => {
+      const { pathname } = new URL(intercepted.request().url());
+      let body = studentPage('<a href="/student/classes/123">Mathematics</a>');
+      if (pathname === '/student/profile') body = studentPage('<a href="/student/profile/edit">Edit Profile</a>');
+      if (pathname === '/student/profile/edit') body = studentPage('<form><input type="email" value="' + email + '"></form>');
+      if (pathname === tasksPath) {
+        if (switchDuringRead) email = 'fixture-two@example.test';
+        body = switchDuringRead ? classPage.replace('8 / 10 pts', '10 / 10 pts') : classPage;
+      }
+      return intercepted.fulfill({ body, contentType: 'text/html' });
+    });
+    browser.setDefaultTimeout(5000);
+    const tab = await browser.newPage();
+    await tab.goto(host + '/student/dashboard');
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    await tab.getByText('74.50%', { exact: true }).waitFor();
+    await tab.getByRole('button', { name: 'Refresh now' }).waitFor();
+    const worker = browser.serviceWorkers()[0];
+    const account = 'profile-' + require('node:crypto').createHash('sha256').update(host + '\n' + email).digest('hex');
+    await worker.evaluate(async (key) => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:' + key + ':refresh'), account);
+    switchDuringRead = true;
+    await tab.getByRole('button', { name: 'Refresh now' }).click();
+    await tab.getByText(/signed-in profile could not be reverified/i).waitFor();
+    const cachedPoints = await worker.evaluate(async (key) =>
+      (await loadAccount(key)).cache.classes['123'].terms['term:71'].records['1'].earnedPoints, account);
+    assert.equal(cachedPoints, 8);
+    assert.equal(await tab.getByText('74.50%', { exact: true }).count(), 0);
+  } finally {
+    await browser.close();
+    await fs.rm(userData, { recursive: true, force: true });
+  }
+});

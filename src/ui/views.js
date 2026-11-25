@@ -89,6 +89,7 @@
     if (!sync.account && sync.identityStatus) {
       const reason = {
         conflicting: 'The page exposed conflicting account identifiers.',
+        'profile-unverified': 'ManageBac’s self-profile page did not expose a verifiable account identifier.',
         'profile-without-id': 'The profile menu was found, but its link did not expose a recognized student ID.',
         missing: 'No account identifier or self-profile link was detected. Open the ManageBac avatar menu and check again.'
       }[sync.identityStatus];

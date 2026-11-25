@@ -193,6 +193,33 @@
   const accountLinks = 'a[href*="/student/profile"],a[href*="/student/students/"],[data-account-menu]';
   const selfProfileLabel = /\b(my profile|manage (?:your )?profile|edit (?:my |your )?profile)\b/i;
 
+  function selfProfile(doc, url) {
+    return [...doc.querySelectorAll('a[href*="/student/profile"]')].some((link) => {
+      const target = localURL(link.getAttribute('href'), url);
+      return target?.pathname.replace(/\/$/, '') === '/student/profile' && !target.search &&
+        [txt(link), link.getAttribute('aria-label'), link.getAttribute('title')]
+          .some((label) => /^(my profile|manage your profile)$/i.test(clean(label)));
+    });
+  }
+
+  function profileEmail(doc) {
+    const emails = new Set();
+    const accept = (raw) => {
+      const value = clean(raw).toLowerCase();
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) emails.add(value);
+    };
+    for (const field of doc?.querySelectorAll('input[type="email"], input[name$="[email]"], input[name="email"]') ?? []) {
+      if (!field.closest('main,[role="main"],form') || field.closest('header,nav,aside,template')) continue;
+      accept(field.getAttribute('value'));
+    }
+    for (const label of doc?.querySelectorAll('dt, th, label') ?? []) {
+      if (label.closest('header,nav,aside,template') || !/^e-?mail(?: address)?:?$/i.test(txt(label))) continue;
+      const value = label.nextElementSibling;
+      if (value?.matches('dd,td,p,span,div')) accept(txt(value));
+    }
+    return emails.size === 1 ? [...emails][0] : null;
+  }
+
   function accountEvidence(doc, url) {
     const ids = new Set();
     let profile = false;
@@ -214,7 +241,7 @@
       if (match) ids.add(match[1]);
     }
     return { id: ids.size === 1 ? [...ids][0] : null,
-      status: ids.size > 1 ? 'conflicting' : ids.size === 1 ? 'verified' : profile ? 'profile-without-id' : 'missing' };
+      status: ids.size > 1 ? 'conflicting' : ids.size === 1 ? 'verified' : profile || selfProfile(doc, url) ? 'profile-without-id' : 'missing' };
   }
 
   const account = (doc, url) => accountEvidence(doc, url).id;
@@ -580,5 +607,5 @@
     };
   }
 
-  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks });
+  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, selfProfile, profileEmail, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks });
 })();

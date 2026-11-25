@@ -31,6 +31,8 @@ If a Tasks page or roster redirects, returns an HTML shell, or exposes rows whil
 
 The extension service worker stores verified grades in private IndexedDB, separated by school, student account, class, term, and assessment. Grade records survive browser restarts and extension reloads. Partial reads can add records and supply missing details. A rendered class row with verified class, term, assessment, category and numerical points can correct that assessment even on a partial list. Deleting absent records requires an authoritative complete list. Empty unattended reads preserve previously collected grades. Stale responses cannot roll back newer observations. **Clear cached grades** removes the current account’s stored grades and manual overrides. If the account cannot be verified, data stays in the current document. No telemetry or private endpoint requests are used.
 
+When the student pages expose only the generic self-profile link, the extension checks the signed-in ManageBac profile. It uses a verified account ID or a local fingerprint of the account email displayed on that profile. The extension keeps the raw email out of the grade cache and diagnostics. It rechecks the profile before committing grade batches that rely on this fallback.
+
 **Current class terms** resolves each subject from its own verified term. An explicit term selection filters by its actual ID. Subject details show the number of usable grades, the last successful read, the source (rendered student page, background HTML, or cache), completeness and freshness, and any sync failure.
 
 ## Troubleshoot sync

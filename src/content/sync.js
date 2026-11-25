@@ -26,6 +26,35 @@
     return { body, url: final, etag: response.headers.get('etag') };
   }
 
+  async function readSelfProfile(signal) {
+    const origin = location.origin;
+    const read = async (path) => {
+      const response = await fetch(origin + path, { credentials: 'same-origin', redirect: 'error', cache: 'no-store',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(4500)]) });
+      if (!response.ok || response.url !== origin + path || !response.headers.get('content-type')?.includes('text/html')) return null;
+      return new DOMParser().parseFromString(await response.text(), 'text/html');
+    };
+    try {
+      const profile = await read('/student/profile');
+      if (!profile) return null;
+      const evidence = app.accountEvidence(profile, origin + '/student/profile');
+      if (evidence.status === 'conflicting') return null;
+      if (evidence.id) return evidence.id;
+      const hasEditLink = [...profile.querySelectorAll('a[href]')].some((link) => {
+        const target = app.localURL(link.getAttribute('href'), origin + '/student/profile');
+        return target?.pathname === '/student/profile/edit' && !target.search &&
+          [link.textContent, link.getAttribute('aria-label'), link.getAttribute('title')]
+            .some((label) => /^edit profile$/i.test(app.clean(label)));
+      });
+      const email = app.profileEmail(profile) ?? (hasEditLink ? app.profileEmail(await read('/student/profile/edit')) : null);
+      if (!email) return null;
+      const fingerprint = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(origin + '\n' + email));
+      return 'profile-' + [...new Uint8Array(fingerprint)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    } catch {
+      return null;
+    }
+  }
+
   class Sync {
     account = undefined;
     cache = app.freshCache();
@@ -50,8 +79,21 @@
         const account = this.account;
         if (sender.id !== chrome.runtime.id || message?.type !== 'mbgc:cache-updated' || !account || message.account !== account) return;
         clearTimeout(this.noticeTimer);
-        this.noticeTimer = setTimeout(() => {
-          this.readCache(account).catch(() => {});
+        this.noticeTimer = setTimeout(async () => {
+          try {
+            if (this.profileIdentity) {
+              const confirmed = await readSelfProfile(new AbortController().signal);
+              if (this.account !== account) return;
+              if (confirmed !== account) {
+                this.identityStatus = 'profile-unverified';
+                await this.identify(null);
+                return;
+              }
+            }
+            await this.readCache(account);
+          } catch {
+            // A later page scan can retry the cache read.
+          }
         }, 100);
       });
       chrome.storage.onChanged.addListener((changes, area) => {
@@ -152,7 +194,16 @@
       }
       const evidence = app.accountEvidence(document, url);
       this.identityStatus = evidence.status;
-      const detected = evidence.id;
+      let detected = evidence.id;
+      this.profileIdentity = !detected && evidence.status !== 'conflicting' && app.studentPath(url.pathname);
+      if (this.profileIdentity) {
+        const recentlyFailed = !this.account && Date.now() - (this.profileAttempt ?? 0) < 3000;
+        if (!recentlyFailed) {
+          this.profileAttempt = Date.now();
+          detected = await readSelfProfile(new AbortController().signal);
+        }
+        if (!detected) this.identityStatus = 'profile-unverified';
+      }
       if (detected && this.documentAccount && detected !== this.documentAccount) this.accountChanged = true;
       if (detected && !this.documentAccount) this.documentAccount = detected;
       await this.identify(this.accountChanged ? null : detected);
@@ -296,10 +347,10 @@
           return { check: { ...previous, at: check.at, unchanged: true, etag: page.etag || undefined }, ok: true };
         }
         const html = new DOMParser().parseFromString(page.body, 'text/html');
-        const foundAccount = app.account(html, page.url);
-        if (foundAccount !== account) return { check: { ...check,
+        const evidence = app.accountEvidence(html, page.url);
+        if (!this.matchesAccount(evidence, account)) return { check: { ...check,
           error: 'The returned HTML did not verify the student account.',
-          renderedCandidate: !foundAccount && ['tasks', 'roster'].includes(route.type) } };
+          renderedCandidate: evidence.status !== 'conflicting' && !evidence.id && ['tasks', 'roster'].includes(route.type) } };
         if (detail) {
           const scan = app.scanTaskDetail(html, page.url, detail);
           if (scan) scan.at = check.at;
@@ -358,6 +409,10 @@
       }
     }
 
+    matchesAccount(evidence, account) {
+      return evidence.id === account || (this.profileIdentity && !evidence.id && evidence.status !== 'conflicting');
+    }
+
     async renderedSource(url, account, signal) {
       const started = Date.now();
       const frame = document.createElement('iframe');
@@ -397,9 +452,9 @@
               const actual = app.sourceURL(doc.URL, url);
               if (doc !== frame.contentDocument || !actual ||
                 app.route(actual).type !== wanted.type || app.route(actual).classId !== wanted.classId) return null;
-              const identity = app.account(doc, actual);
-              if (identity && identity !== account) return null;
-              if (identity === account) {
+              const identity = app.accountEvidence(doc, actual);
+              if (identity.status === 'conflicting' || (identity.id && identity.id !== account)) return null;
+              if (this.matchesAccount(identity, account)) {
                 const scan = app.scan(doc, actual);
                 if (wanted.type === 'tasks' && !scan.term.id && !openedTermMenu) {
                   const surface = app.taskSurface(doc);
@@ -425,7 +480,7 @@
             }
             await new Promise((resolve) => setTimeout(resolve, 200));
           }
-          return !signal.aborted && doc === frame.contentDocument && app.account(doc, url) === account ? best : null;
+          return !signal.aborted && doc === frame.contentDocument && this.matchesAccount(app.accountEvidence(doc, url), account) ? best : null;
         } finally {
           observer.disconnect();
         }
@@ -476,6 +531,19 @@
           return;
         }
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(75000)]);
+        const confirmAccount = async () => {
+          if (signal.aborted || account !== this.account) return false;
+          const current = app.accountEvidence(document, location.href);
+          if (!this.profileIdentity || current.id || current.status === 'conflicting') return current.id === account;
+          const confirmed = await readSelfProfile(signal);
+          if (signal.aborted || account !== this.account) return false;
+          if (confirmed === account) return true;
+          this.identityStatus = 'profile-unverified';
+          await this.identify(null);
+          this.message = 'The signed-in profile could not be reverified. Refresh to check it again.';
+          return false;
+        };
+        if (!await confirmAccount()) return;
         const seen = new Set();
         const pending = [...urls.values()].sort((a, b) => {
           const rank = (url) => app.route(url).type === 'roster' ? 0 : app.route(url).type === 'workspace' ? 1 : url.search ? 3 : 2;
@@ -493,6 +561,10 @@
         let lastCommit = performance.now();
         const flush = async () => {
           if (!staged.length && !checksToCommit.length) return;
+          if (!await confirmAccount()) {
+            controller.abort();
+            return;
+          }
           await this.apply(staged, checksToCommit);
           staged = [];
           checksToCommit = [];
@@ -548,7 +620,7 @@
             renderAttempts++;
             const target = app.sourceURL(check.source, location.href);
             const rendered = await this.renderedSource(target, account, signal);
-            if (controller.signal.aborted || account !== this.account || app.account(document, location.href) !== account) return;
+            if (!await confirmAccount()) return;
             if (rendered) {
               checked++;
               failures--;
@@ -575,7 +647,7 @@
             seen.add(source);
             return this.inspectSource(source, url, signal, account, details.get(source));
           }));
-          if (controller.signal.aborted || account !== this.account || app.account(document, location.href) !== account) return;
+          if (signal.aborted || account !== this.account) return;
           for (const result of results.filter(Boolean)) {
             if (result.check.renderedCandidate) renderedChecks.push(result.check);
             if (result.check.unchanged) unchanged++;
@@ -590,6 +662,7 @@
           if (pending.length && !signal.aborted) await new Promise((resolve) => setTimeout(resolve, requestSpacing));
         }
         if (!controller.signal.aborted && account === this.account) await flush();
+        if (signal.aborted || account !== this.account) return;
         if (manual || failures || pending.length || renderedChecks.length) this.message = [
           checked ? `Checked ${checked} student pages.` : 'Background refresh found no new usable data.',
           unchanged ? `${unchanged} unchanged.` : '',

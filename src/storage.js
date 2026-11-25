@@ -38,7 +38,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || (sender.origin != null && sender.origin !== origin) || sender.frameId !== 0 || !/^https:\/\/uia\.managebac\.com\/student(?:[/?#]|$)/.test(sender.url ?? '') ||
     typeof message !== 'object' || !message?.type?.startsWith('mbgc:')) return;
   const work = enqueue(async () => {
-    const account = /^\d+$/.test(message.account ?? '') ? message.account : null;
+    const account = /^(?:\d+|profile-[a-f0-9]{64})$/.test(message.account ?? '') ? message.account : null;
     if (!account) throw new Error('A student account was not identified.');
     const key = `mbgc:cache:${new URL(origin).host}:${account}`;
     const overrideKey = `mbgc:overrides:${new URL(origin).host}:${account}`;
