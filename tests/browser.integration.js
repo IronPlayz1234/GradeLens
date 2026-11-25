@@ -221,7 +221,8 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     await page.getByText(/3 assessments read of 3 candidates · 2 with usable points/).waitFor();
     await page.getByRole('link', { name: 'Grade Estimator' }).click();
     await page.locator('.mbgc-actual .mbgc-numeral', { hasText: '54.00%' }).waitFor();
-    assert.equal(await page.getByLabel('Academic term').inputValue(), 'term:671');
+    assert.equal(await page.getByLabel('Academic term').inputValue(), 'current');
+    await page.getByLabel('Academic term').locator('option[value="term:671"]').waitFor({ state: 'attached' });
     assert.ok((await page.locator('.mbgc-header').boundingBox()).width >= widths.viewport * .65);
     await page.setViewportSize({ width: 360, height: 800 });
     await page.waitForFunction(() => {
@@ -263,7 +264,9 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     });
     await page.locator('.mbgc-compact .mbgc-numeral', { hasText: '60.00%' }).waitFor();
     await page.getByRole('link', { name: 'Overall Grades' }).click();
-    assert.equal(await page.getByLabel('Academic term').inputValue(), 'term:672');
+    await page.locator('.mbgc-subject .mbgc-numeral', { hasText: '60.00%' }).waitFor();
+    assert.equal(await page.getByLabel('Academic term').inputValue(), 'current');
+    await page.getByLabel('Academic term').selectOption('term:672');
     await page.getByRole('link', { name: 'Grade Estimator' }).click();
     assert.equal(await page.getByLabel('Academic term').inputValue(), 'term:672');
     await page.getByRole('button', { name: 'Back to ManageBac' }).click();
@@ -292,6 +295,148 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     await page.getByText(/letter grades alone cannot produce a percentage/i).waitFor();
     await page.getByText('Sync diagnostics', { exact: true }).click();
     await page.getByText(/current document only · student identity/i).waitFor();
+  } finally {
+    await context.close();
+    await fs.rm(userData, { recursive: true, force: true });
+  }
+});
+
+test('automatically discovers enrolled classes, keeps PE consistent, and coalesces grade mutations across tabs', { timeout: 45000 }, async () => {
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-roster-test-'));
+  const context = await chromium.launchPersistentContext(userData, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root],
+    viewport: { width: 1280, height: 850 }
+  });
+  try {
+    context.setDefaultTimeout(8000);
+    const account = '<meta name="current-student-id" content="28">';
+    const links = '<nav><a href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a>' +
+      '<a href="/student/classes">My Classes</a><a href="/student/classes?tab=all">Browse All Classes</a></nav>';
+    const shell = (content) => `<!doctype html><html><head>${account}</head><body>${links}<main>${content}</main></body></html>`;
+    const pePath = '/student/classes/321/core_tasks';
+    const mathPath = '/student/classes/654/core_tasks';
+    const artPath = '/student/classes/987/core_tasks';
+    const oldPE = pePath + '?term_id=812';
+    const home = '/student/dashboard';
+    const lesson = (path, name, term, tasks, historical = '') => shell(
+      `<h1 class="class-title">${name}</h1><section data-all-tasks><h2>All Tasks</h2>
+      <form action="${path}"><select name="term_id">
+      <option value="${term}" selected>Semester 1</option>${historical}</select></form>
+      <div class="chart-frame"><h3>Assessment</h3><canvas></canvas></div>
+      <div data-task-list="all" data-term-id="${term}" data-total-count="${tasks.length}">${tasks.map(([id, title, points]) =>
+        `<article class="short-assignment"><a href="${path}/${id}">${title}</a><span class="task-category">Coursework</span><div class="task-score">
+        ${points === null ? '<span class="submission-status">Pending</span>' : `<span class="points">${points}</span>`}</div></article>`
+      ).join('')}</div></section>
+      <div id="categories-table"><div class="list-item"><div class="cell">Coursework</div><div class="cell">100%</div></div></div>
+      <div id="unrelated"></div>`);
+    const pe = lesson(pePath, 'Physical Education AS', '811',
+      [['1', 'Push Ups', '100 / 100'], ['2', '1 mile run', '100 / 100']], '<option value="812">Semester 2</option>');
+    const pendingTasks = Array.from({ length: 8 }, (_, i) => [String(i + 10), 'Upcoming ' + i, null]);
+    const math = lesson(mathPath, 'Mathematics', '60',
+      [['1', 'Quiz', '13 / 30'], ['2', 'Test', '22 / 24'], ['3', 'Project', '15 / 30'], ['4', 'Exam', '17 / 20'], ...pendingTasks]);
+    const art = lesson(artPath, 'Visual Arts', '901', []).replace('data-total-count="0"', '');
+    const requests = new Map();
+    let inFlight = 0;
+    let peak = 0;
+    let backgroundEmptyPE = false;
+    await context.route(host + '/**', async (intercepted) => {
+      const request = intercepted.request();
+      const url = new URL(request.url());
+      const source = url.pathname + url.search;
+      const background = !request.isNavigationRequest();
+      if (background) {
+        const entries = requests.get(source) ?? [];
+        entries.push(request.headers()['if-none-match']);
+        requests.set(source, entries);
+        peak = Math.max(peak, ++inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 190));
+      }
+      try {
+        const etag = source === mathPath ? '"math-v1"' : undefined;
+        if (etag && request.headers()['if-none-match'] === etag) {
+          await intercepted.fulfill({ status: 304, headers: { etag } });
+          return;
+        }
+        const body = source === '/student/classes' ? shell(
+          '<a href="/student/classes/321">Physical Education AS</a><a href="/student/classes?page=2" rel="next">Next</a>') :
+          source === '/student/classes?page=2' ? shell('<a href="/student/classes/654">Mathematics</a><a href="/student/classes/987">Visual Arts</a>') :
+          source === mathPath ? math : source === artPath ? art :
+          source === oldPE ? lesson(pePath, 'Physical Education AS', '812', [['3', 'Fitness test', '75 / 100']]) :
+          url.pathname === pePath ? (background && backgroundEmptyPE ? lesson(pePath, 'Physical Education AS', '811', []) : pe) :
+          shell('<h1>Student workspace</h1>');
+        await intercepted.fulfill({ contentType: 'text/html', headers: etag ? { etag } : {}, body });
+      } finally {
+        if (background) inFlight--;
+      }
+    });
+
+    const dashboard = await context.newPage();
+    await dashboard.goto(host + home);
+    await dashboard.getByRole('link', { name: 'Overall Grades' }).click();
+    const row = (title) => dashboard.locator('.mbgc-subject', { hasText: title });
+    const grade = (title, value) => row(title).locator('.mbgc-numeral', { hasText: value }).waitFor();
+    const peRow = row('Physical Education AS');
+    await grade('Physical Education AS', '100.00%');
+    await peRow.getByText(/2 graded assessments/).waitFor();
+    await grade('Mathematics', '67.50%');
+    await row('Mathematics').getByText(/4 graded assessments/).waitFor();
+    await row('Visual Arts').locator('summary').click();
+    await row('Visual Arts').getByText(/No task rows in the returned page/).waitFor();
+    await dashboard.getByLabel('Academic term').locator('option[value="term:812"]').waitFor({ state: 'attached' });
+    assert.ok(requests.has('/student/classes?page=2'));
+    assert.ok(requests.has(oldPE));
+    assert.ok(!requests.has('/student/classes?tab=all'));
+    assert.ok(peak >= 2 && peak <= 3, 'unexpected concurrent request count: ' + peak);
+    await dashboard.getByLabel('Academic term').selectOption('term:812');
+    await grade('Physical Education AS', '75.00%');
+    await dashboard.getByLabel('Academic term').selectOption('current');
+    await grade('Physical Education AS', '100.00%');
+
+    const native = await context.newPage();
+    await native.goto(host + pePath);
+    const compactGrade = (value) => native.locator('.mbgc-compact .mbgc-numeral', { hasText: value }).waitFor();
+    await compactGrade('100.00%');
+    await native.getByRole('link', { name: 'Overall Grades' }).click();
+    await native.locator('.mbgc-subject', { hasText: 'Physical Education AS' }).locator('.mbgc-numeral', { hasText: '100.00%' }).waitFor();
+    await native.getByRole('button', { name: 'Back to ManageBac' }).click();
+
+    const evaluateExtension = await extensionWorld(context, native);
+    await evaluateExtension(`globalThis.mbgcCounters = { full: 0, score: 0, writes: 0 };
+      const oldScan = MBGC.scan, oldScores = MBGC.readScoreChanges, oldSend = chrome.runtime.sendMessage;
+      MBGC.scan = (...args) => { mbgcCounters.full++; return oldScan(...args); };
+      MBGC.readScoreChanges = (...args) => { mbgcCounters.score++; return oldScores(...args); };
+      chrome.runtime.sendMessage = (message) => { if (message.type === 'mbgc:scan') mbgcCounters.writes++; return oldSend(message); };
+    `);
+    await native.evaluate(async () => {
+      const unrelated = document.querySelector('#unrelated');
+      const chart = document.querySelector('canvas');
+      const score = document.querySelector('.points');
+      for (let index = 0; index < 80; index++) {
+        unrelated.textContent = 'Unrelated ' + index;
+        chart.style.opacity = String(.1 + index / 100);
+        if (index >= 55) score.textContent = String(100 - index) + ' / 100';
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      score.textContent = '90 / 100';
+    });
+    await compactGrade('95.00%');
+    await grade('Physical Education AS', '95.00%');
+    const counters = await evaluateExtension('JSON.stringify(mbgcCounters)');
+    assert.deepEqual(JSON.parse(counters.result.value), { full: 0, score: 1, writes: 1 });
+
+    backgroundEmptyPE = true;
+    await dashboard.bringToFront();
+    const worker = context.serviceWorkers()[0];
+    await worker.evaluate(() => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:28:refresh'));
+    await dashboard.getByRole('button', { name: 'Refresh now' }).click();
+    await dashboard.getByText(/1 unchanged/).waitFor();
+    await grade('Physical Education AS', '95.00%');
+    await peRow.getByText(/2 graded assessments/).waitFor();
+    await peRow.locator('summary').click();
+    await peRow.getByText(/No task rows in the returned page/).waitFor();
+    await peRow.getByText(/Last successful sync/).waitFor();
+    assert.deepEqual(requests.get(mathPath), [undefined, '"math-v1"']);
   } finally {
     await context.close();
     await fs.rm(userData, { recursive: true, force: true });

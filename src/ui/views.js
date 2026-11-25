@@ -48,20 +48,10 @@
       Number(a.label !== 'Selected academic term') - Number(b.label !== 'Selected academic term'))
     .map(([id, bucket]) => [id, bucket.label]));
 
-  function chooseTerm(sync, view, options) {
-    const fromClass = sync.context?.context.type === 'tasks' && sync.context.term.id
-      ? 'term:' + sync.context.term.id : null;
-    if (fromClass && view.nativeTerm !== fromClass && options.some(([id]) => id === fromClass)) {
-      view.nativeTerm = fromClass;
-      view.term = fromClass;
-      view.scenario = null;
-    }
-    if (options.some(([id]) => id === view.term)) return;
-    const selected = Object.values(sync.cache.classes).map((item) => item.selectedTerm)
-      .filter(Boolean).sort((a, b) => b.at - a.at)[0];
-    const preferred = selected ? 'term:' + selected.id : null;
-    view.term = options.some(([id]) => id === preferred) ? preferred :
-      [...options].reverse().find(([id]) => id !== 'unknown')?.[0] ?? options[0]?.[0];
+  function termOptionsFor(sync, view) {
+    const options = [[app.currentTerms, 'Current class terms'], ...terms(sync)];
+    if (!options.some(([id]) => id === view.term)) view.term = app.currentTerms;
+    return options;
   }
 
   function syncStatus(sync) {
@@ -112,19 +102,20 @@
     const tasks = Object.values(bucket?.records ?? {}).sort((a, b) => a.title.localeCompare(b.title));
     const verified = Boolean(bucket?.termId);
     const weights = sync.overrides.weights[classId] ?? bucket?.weights ?? {};
+    const error = bucket?.lastErrorAt ? bucket.lastError : entry?.lastError;
     const scale = sync.overrides.scale ?? bucket?.scale ?? app.defaultScale;
     const scaleLabel = sync.overrides.scale ? 'Custom letter scale' : bucket?.scale ? 'Displayed task letter scale' : 'Default task letter scale';
     const result = app.calculate(verified ? tasks : [], weights, sync.settings.method);
     const staleAfter = Math.max(15, sync.settings.refreshMinutes * 2) * 60000;
     const stale = Boolean(bucket?.lastScan && Date.now() - bucket.lastScan > staleAfter);
-    const provisional = !bucket?.complete || result.flagged > 0 || stale || Boolean(sync.overrides.weights[classId]);
+    const provisional = !bucket?.complete || Boolean(error) || result.flagged > 0 || stale || Boolean(sync.overrides.weights[classId]);
     const missing = !verified ? 'Term unavailable. Confirm the academic term in Class Tasks.' :
       result.missing.length ? `Weights needed for ${result.missing.join(', ')}.` :
         !result.count ? (result.flagged ? 'Assessment points are missing or invalid.' :
           tasks.length ? 'No graded assessments in this term.' : 'No assessment rows synced for this term.') :
           result.percentage === null ? 'No graded assessments have a positive category weight.' : '';
     return { classId, title: entry?.name || `Class ${classId}`, bucket, tasks, verified, weights, scale, scaleLabel,
-      result, stale, provisional, missing, termKey, label: bucket?.label || 'Unidentified term' };
+      result, stale, provisional, error, missing, termKey, label: bucket?.label || 'Unidentified term' };
   }
 
   function score(value, scale, className = '') {
@@ -196,7 +187,7 @@
   }
 
   function labelStatus(data) {
-    return data.stale ? 'Stale cache' : data.provisional ? 'Provisional data' : 'Estimate';
+    return data.stale ? 'Stale cache' : data.provisional ? 'Partial data' : 'Complete scan';
   }
 
   function compact(sync, data, type, changed) {
@@ -209,7 +200,8 @@
         h('span', 'mbgc-chip', labelStatus(data))),
       h('p', 'mbgc-compact-note mbgc-muted',
         changed ? 'Grade updated · ' : '', data.missing ? data.missing + ' ' : '',
-        data.bucket?.lastScan ? `Synced ${time(data.bucket.lastScan)}` : '',
+        data.bucket?.lastScan ? `Synced ${time(data.bucket.lastScan)}. ` : '',
+        data.error ? data.error + ' ' : '',
         (type === 'tasks' || sync.storageState === 'unavailable') && syncStatus(sync)
           ? ' ' + syncStatus(sync) : ''));
     item.setAttribute('aria-label', name);
@@ -230,7 +222,7 @@
       h('summary', 'mbgc-subject-summary',
         h('div', 'mbgc-subject-name', h('span', 'mbgc-mark', icon('book')),
           h('div', '', h('h3', '', data.title), h('p', 'mbgc-muted',
-            data.verified ? `${data.result.count} graded assessment${data.result.count === 1 ? '' : 's'}` : 'Term unavailable',
+            data.verified ? `${data.result.count} graded assessment${data.result.count === 1 ? '' : 's'} · ${data.label}` : 'Term unavailable',
             view.changed.has(data.classId + ':' + data.termKey) ? h('span', 'mbgc-updated', ' · Grade updated') : ''))),
         h('div', 'mbgc-subject-status', h('span', 'mbgc-chip', labelStatus(data))),
         h('div', 'mbgc-subject-grade', score(data.result.percentage, data.scale),
@@ -238,11 +230,15 @@
         h('span', 'mbgc-chevron', icon('chevron'))),
       h('div', 'mbgc-subject-detail',
         data.missing ? h('p', 'mbgc-notice', data.missing) : null,
+        data.error ? h('p', 'mbgc-notice', data.error) :
+          data.bucket?.lastScan && !data.bucket.complete ? h('p', 'mbgc-muted',
+            'The full task list could not be verified. Open Class Tasks if ManageBac loads additional assessments after rendering.') : null,
         h('div', 'mbgc-detail-meta',
           h('p', 'mbgc-muted', app.methods[sync.settings.method].explanation, ' ',
-            data.scaleLabel, '. ', data.bucket?.lastScan ? `Last scanned ${time(data.bucket.lastScan)}.` : '',
+            data.scaleLabel, '. ', data.bucket?.lastScan ? `Last successful sync ${time(data.bucket.lastScan)}.` : 'No successful sync for this term.',
             data.result.ungraded ? ` ${data.result.ungraded} without usable scores.` : '',
-            data.result.flagged ? ` ${data.result.flagged} flagged for review.` : ''),
+            data.result.flagged ? ` ${data.result.flagged} flagged for review.` : '',
+            data.result.excluded ? ` ${data.result.excluded} excluded by grading rules.` : ''),
           open),
         categoryDetails(data.result, data.tasks)));
     return details;
@@ -357,10 +353,9 @@
   }
 
   function dashboard(sync, view, handlers) {
-    const termOptions = [...terms(sync)];
+    const termOptions = termOptionsFor(sync, view);
     const classes = Object.entries(sync.cache.classes).sort(([, a], [, b]) => (a.name || '').localeCompare(b.name || ''));
-    chooseTerm(sync, view, termOptions);
-    const subjects = classes.filter(([, entry]) => entry.terms[view.term] ||
+    const subjects = classes.filter(([, entry]) => view.term === app.currentTerms || entry.terms[view.term] ||
       (view.term !== 'unknown' && !Object.keys(entry.terms).some((id) => id !== 'unknown')));
     const content = h('div', 'mbgc-page', header(sync, 'grades', view, handlers, termOptions),
       h('div', 'mbgc-section-heading', h('h2', '', 'Subjects'),
@@ -370,7 +365,8 @@
         ? h('div', 'mbgc-skeleton', h('span'), h('span'), h('span'))
         : empty('No grades for this term yet', 'Open Class Tasks or Tasks & Deadlines → Past, then load any additional tasks and refresh.'));
     } else {
-      content.append(h('div', 'mbgc-subjects', subjects.map(([id]) => subjectRow(sync, gradeData(sync, id, view.term), view))));
+      content.append(h('div', 'mbgc-subjects', subjects.map(([id, item]) => subjectRow(sync, gradeData(sync, id,
+        view.term === app.currentTerms ? app.classTermKey(item) : view.term), view))));
     }
     content.append(h('p', 'mbgc-footnote', 'The school’s term calculation method and letter scale are unverified. Partial scans can miss assessments.'),
       settings(sync, classes.map(([id, item]) => [id, item.name || 'Class ' + id]), view));
@@ -378,9 +374,9 @@
   }
 
   function estimator(sync, view, handlers) {
-    const termOptions = [...terms(sync)];
-    chooseTerm(sync, view, termOptions);
-    const subjects = Object.entries(sync.cache.classes).filter(([, item]) => item.terms[view.term])
+    const termOptions = termOptionsFor(sync, view);
+    const subjects = Object.entries(sync.cache.classes).filter(([, item]) =>
+      view.term === app.currentTerms ? item.terms[app.classTermKey(item)] : item.terms[view.term])
       .map(([id, item]) => [id, item.name || 'Class ' + id]).sort(([, a], [, b]) => a.localeCompare(b));
     const page = h('div', 'mbgc-page', header(sync, 'estimator', view, handlers, termOptions));
     if (!subjects.some(([id]) => id === view.classId)) {
@@ -397,7 +393,12 @@
       handlers.render();
     });
     page.append(h('div', 'mbgc-estimator-subject', field('Subject', choice)));
-    const data = gradeData(sync, view.classId, view.term);
+    const selectedKey = view.term === app.currentTerms ? app.classTermKey(sync.cache.classes[view.classId]) : view.term;
+    if (view.scenarioTerm !== selectedKey) {
+      view.scenarioTerm = selectedKey;
+      view.scenario = null;
+    }
+    const data = gradeData(sync, view.classId, selectedKey);
     const categories = Object.keys(data.weights).filter((category) => data.weights[category] > 0);
     if (!data.verified || !categories.length) {
       page.append(empty('This subject needs more information',

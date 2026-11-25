@@ -34,6 +34,10 @@
   let changed = new Map();
   let wasViewing = false;
   let lastRenderedMethod;
+  let gradeRevision = '';
+  let fullScan = false;
+  let dirtyRows = new Set();
+  let scanQueuedAt = 0;
   const sync = new app.Sync(scheduleRender);
 
   function freshView() {
@@ -116,7 +120,7 @@
   }
 
   function installNav() {
-    const anchor = getWorkspaceAnchor();
+    const anchor = nativeAnchor?.isConnected ? nativeAnchor : getWorkspaceAnchor();
     if (nativeAnchor === anchor && nav.length && nav.every((item) => item.isConnected)) return;
     for (const item of nav) (item.closest('.mbgc-nav-shell') ?? item).remove();
     fallback?.remove();
@@ -172,18 +176,16 @@
   }
 
   function selectClassTerm(classId) {
-    const current = sync.context?.term;
-    if (current?.id) return 'term:' + current.id;
-    if (sync.context?.context.type === 'tasks') return 'unknown';
-    const subject = sync.cache.classes[classId];
-    const preferred = subject?.selectedTerm ?? subject?.defaultTerm;
-    if (preferred) return 'term:' + preferred.id;
-    const options = Object.entries(subject?.terms ?? {}).filter(([key, bucket]) => key !== 'unknown' && bucket.lastScan);
-    if (options.length === 1) return options[0][0];
-    return 'unknown';
+    const native = sync.context?.term.id;
+    if (sync.context?.context.type === 'tasks' && !native) return 'unknown';
+    return app.classTermKey(sync.cache.classes[classId], native);
   }
 
   function updateChanges() {
+    for (const [key, expiry] of changed) if (Date.now() > expiry) changed.delete(key);
+    const revision = sync.revision + ':' + sync.settings.method + ':' + JSON.stringify(sync.overrides.weights);
+    if (revision === gradeRevision) return;
+    gradeRevision = revision;
     const next = new Map();
     for (const [classId, entry] of Object.entries(sync.cache.classes)) {
       for (const term of Object.keys(entry.terms)) {
@@ -204,7 +206,6 @@
         notify = true;
       }
     }
-    for (const [key, expiry] of changed) if (Date.now() > expiry) changed.delete(key);
     if (notify) setTimeout(scheduleRender, 9200);
     lastGrades = next;
     view.changed = changed;
@@ -257,7 +258,7 @@
     if (panel) {
       card.remove();
       mountDashboard();
-      const contentKey = JSON.stringify([panel, sync.settings, sync.cache, sync.overrides, sync.refreshing, sync.message, sync.diagnostics, sync.storageState, sync.account, [...changed]]);
+      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.refreshing, sync.message, sync.diagnostics, sync.storageState, sync.account, [...changed]]);
       if (force || viewKey !== contentKey) {
         const editor = stageHost.shadowRoot?.activeElement ?? document.activeElement;
         if (!force && editor?.matches('textarea') && stage.contains(editor)) return;
@@ -306,66 +307,86 @@
       render();
     }, 35);
   }
-  function queueScan() {
+  function queueScan(rows = null) {
+    if (rows === null) fullScan = true;
+    else for (const row of rows) dirtyRows.add(row);
     clearTimeout(scanTimer);
+    const now = performance.now();
+    scanQueuedAt ||= now;
     scanTimer = setTimeout(() => {
-      sync.scanVisible().catch(() => {
+      const candidates = fullScan ? null : dirtyRows;
+      dirtyRows = new Set();
+      fullScan = false;
+      scanQueuedAt = 0;
+      sync.scanVisible(candidates).then(() => {
+        if (candidates === null) return sync.refresh();
+      }).catch(() => {
         sync.message = 'This page could not be scanned. Cached grades are still available.';
         scheduleRender();
       });
-    }, 280);
+    }, Math.min(230, Math.max(0, 900 - (now - scanQueuedAt))));
   }
+
   function reconcile() {
     const current = location.href;
     const previous = new URL(lastURL);
     const next = new URL(current);
     lastURL = current;
-    render();
     if (previous.pathname !== next.pathname || previous.search !== next.search) {
+      sync.stopRefresh();
       queueScan();
-      if (['overview', 'tasks', 'workspace'].includes(app.route(next).type) &&
-        Date.now() - sync.lastAttempt > 30000) sync.refresh();
     }
+    render();
   }
   function owns(node) {
     return (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)?.closest('.mbgc-owned');
   }
-  const relevant = [app.selectors.tasks, app.selectors.termControls, app.selectors.score, app.selectors.term, app.selectors.weights, app.selectors.scale,
-    'a[href*="/student/"]', 'h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4', '[data-task-list],[data-current-student-id],[role="listbox"],[role="option"]'].join(',');
+
+  const gradeRoots = app.selectors.tasks + ',' + app.selectors.score;
+  const chartRoots = 'canvas,svg,[data-chart],.chart-frame,.highcharts-container';
+  const relevant = [gradeRoots, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
+    app.discoveryLinks, 'a[href*="/core_tasks/"],a[href*="/tasks/"]', 'table,thead,h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4,.title',
+    '[data-task-list],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
   const structure = relevant + ',main,[role="main"],#content,[data-all-tasks]';
-  function touchesPage(records) {
-    let surface;
+  const scoreAttributes = new Set(['data-earned-points', 'data-max-points', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade']);
+
+  function handleMutations(records) {
+    if (location.href !== lastURL) { reconcile(); return; }
+    const scores = new Set();
     for (const entry of records) {
       if (owns(entry.target)) continue;
-      if (entry.type === 'attributes' && ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'].includes(entry.attributeName) &&
-        !entry.target.closest(relevant) && !entry.target.matches('li.active, li.selected, .dropdown-toggle')) {
-        if (entry.target === document.body || entry.target === document.documentElement ||
-          entry.target.matches('main, [role="main"], nav, aside, a[aria-current="page"]')) scheduleRender();
+      const target = entry.target.nodeType === Node.ELEMENT_NODE ? entry.target : entry.target.parentElement;
+      if (!target) continue;
+      const children = [...entry.addedNodes, ...entry.removedNodes];
+      if (entry.type === 'childList' && children.every(owns)) continue;
+      if (entry.type === 'attributes' && (target === document.body || target === document.documentElement ||
+        target.matches('main,[role="main"],nav,aside')) &&
+        /^(class|style|data-theme|data-bs-theme|data-color-scheme)$/.test(entry.attributeName)) {
+        scheduleRender();
         continue;
       }
-      if (entry.type === 'childList' && [...entry.addedNodes, ...entry.removedNodes].every(owns)) continue;
-      const target = entry.target.nodeType === Node.ELEMENT_NODE ? entry.target : entry.target.parentElement;
-      if (target?.closest(relevant) && !target.matches('body')) return true;
-      const section = (surface ??= (app.route(new URL(location.href)).type === 'tasks'
-        ? app.taskSurface(document) : {})).section;
-      if (section?.contains(target) && (entry.type !== 'attributes' ||
-        ['aria-selected', 'aria-current', 'aria-expanded', 'data-selected', 'class'].includes(entry.attributeName))) return true;
-      if ([...entry.addedNodes, ...entry.removedNodes].some((node) => node.nodeType === Node.ELEMENT_NODE &&
-        !owns(node) && (node.matches(structure) || node.querySelector(structure)))) return true;
+      const row = target.closest(app.selectors.tasks);
+      if (row && (scoreAttributes.has(entry.attributeName) || (entry.type !== 'attributes' && target.closest(app.selectors.score) &&
+        children.every((node) => node.nodeType === Node.TEXT_NODE)))) {
+        scores.add(row);
+        continue;
+      }
+      if (target.matches('head') || target.closest(chartRoots)) continue;
+      if (entry.type === 'attributes' && /^(style|class)$/.test(entry.attributeName) &&
+        !target.matches('.dropdown-toggle,li.active,li.selected') && !target.closest(app.selectors.termControls)) continue;
+      if (target.closest(relevant) || children.some((node) => node.nodeType === Node.ELEMENT_NODE &&
+        !owns(node) && (node.matches(structure) || node.querySelector(structure)))) {
+        queueScan();
+        return;
+      }
     }
-    return false;
+    if (scores.size) queueScan(scores);
   }
 
-  const observer = new MutationObserver((records) => {
-    if (touchesPage(records)) {
-      if (location.href !== lastURL) reconcile();
-      else scheduleRender();
-      queueScan();
-    }
-  });
+  const observer = new MutationObserver(handleMutations);
   observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
     attributeFilter: ['data-selected-term-id', 'data-term-id', 'data-total-count', 'class', 'style', 'hidden', 'aria-hidden',
-      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-current-student-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
+      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   window.addEventListener('popstate', reconcile);
   window.addEventListener('hashchange', reconcile);
@@ -380,10 +401,14 @@
     }
   });
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) return;
-    queueScan();
-    sync.refresh();
+    if (document.hidden) {
+      if (!sync.manualRefresh) sync.stopRefresh();
+      return;
+    }
+    if (!sync.context || location.href !== lastURL) queueScan();
+    else void sync.refresh();
   });
+  window.addEventListener('pagehide', () => sync.stopRefresh());
   app.scheme.addEventListener('change', scheduleRender);
   window.addEventListener('resize', scheduleRender);
   setInterval(() => {

@@ -2,6 +2,7 @@
   const app = globalThis.MBGC;
   const classPattern = /^\/student\/classes\/(\d+)(?:\/(core_tasks|tasks)(?:\/(\d+))?)?\/?$/;
   const studentPath = (path) => path === '/student' || path.startsWith('/student/');
+  const rosterPattern = /^\/student\/(?:classes|my_classes)\/?$/;
   const workspacePath = '/student/tasks_and_deadlines';
   const termParams = ['term_id', 'academic_term_id', 'semester_id', 'reporting_period_id', 'term', 'semester'];
   const headingSelector = 'h1,h2,h3,h4,h5,[role="heading"],.h2,.h3,.h4,.section-title,.panel-title,.card-title,div,span,strong';
@@ -34,6 +35,7 @@
   function route(url) {
     const match = url.pathname.match(classPattern);
     if (match) return { classId: match[1], type: match[3] ? 'task' : match[2] ? 'tasks' : 'overview' };
+    if (rosterPattern.test(url.pathname)) return { type: 'roster' };
     if (url.pathname.replace(/\/$/, '') === workspacePath) return { type: 'workspace' };
     return { type: 'other' };
   }
@@ -159,18 +161,20 @@
       if (new Set(results.map((term) => term.id)).size !== 1) return null;
       return results.find((term) => termLabel.test(term.label)) ?? results[0];
     };
-    return find(surface.section, true) || find(doc, false) ||
-      (query ? { id: query.id, label: 'Selected academic term' } : { id: null, label: 'Unidentified term' });
+    const fromControl = find(surface.section, true) || find(doc, false);
+    if (fromControl) return fromControl;
+    if (query) return { id: query.id, label: 'Selected academic term' };
+    return { id: null, label: 'Unidentified term' };
   }
 
   function account(doc, url) {
     const links = doc.querySelectorAll('header a[href], nav a[href], [role="banner"] a[href], [data-account-menu] a[href]');
     const ids = new Set();
-    for (const meta of doc.querySelectorAll('meta[name="current-student-id"], meta[name="current-user-id"]')) {
+    for (const meta of doc.querySelectorAll('meta[name="current-student-id"], meta[name="current-user-id"], meta[name="current_student_id"], meta[name="current_user_id"]')) {
       const value = meta.getAttribute('content');
       if (/^\d+$/.test(value)) ids.add(value);
     }
-    for (const marker of doc.querySelectorAll('header [data-current-student-id], [role="banner"] [data-current-student-id], [data-account-menu][data-current-student-id], [data-account-menu][data-current-user-id]')) {
+    for (const marker of doc.querySelectorAll('body[data-current-student-id], body[data-current-user-id], header [data-current-student-id], [role="banner"] [data-current-student-id], [data-account-menu][data-current-student-id], [data-account-menu][data-current-user-id]')) {
       const value = marker.getAttribute('data-current-student-id') || marker.getAttribute('data-current-user-id');
       if (/^\d+$/.test(value)) ids.add(value);
     }
@@ -222,22 +226,47 @@
     return app.normalizeScale(rows);
   }
 
-  function discover(doc, url) {
+  const discoveryLinks = 'a[href*="/student/classes"],a[href*="/student/my_classes"],a[href*="/student/tasks_and_deadlines"],a[rel="next"]';
+  const assessmentLinks = 'a[href*="/core_tasks/"],a[href*="/tasks/"]';
+  const enrolled = /^(?:my classes|enrolled classes|classes)$/i;
+  const enrolledFilter = /^(?:my_classes|enrolled|joined)$/i;
+
+  function sourceURL(raw, base) {
+    const url = localURL(raw, base);
+    if (!url) return null;
+    const { type } = route(url);
+    if (!['tasks', 'workspace', 'roster'].includes(type)) return null;
+    if (type === 'roster' && [...url.searchParams].some(([name, value]) =>
+      !((name === 'page' && /^\d{1,4}$/.test(value)) || (['tab', 'view', 'filter'].includes(name) && enrolledFilter.test(value))))) return null;
+    url.hash = '';
+    return url;
+  }
+
+  function discover(doc, url, activeTerm) {
     const sources = new Map();
     const classes = {};
-    for (const link of doc.querySelectorAll('a[href]')) {
+    const current = route(url);
+    const isCurrentSelection = (target, termId) => current.type === 'tasks' && !url.search &&
+      target.pathname === url.pathname && termId === activeTerm;
+    const browsingCatalog = current.type === 'roster' && (!sourceURL(url, url) ||
+      [...doc.querySelectorAll('[aria-current="page"],[aria-selected="true"],.active')].some((node) => /^browse all classes$/i.test(txt(node))));
+    for (const link of doc.querySelectorAll(discoveryLinks)) {
       if (link.closest('.mbgc-owned')) continue;
       const destination = localURL(link.getAttribute('href'), url);
       if (!destination) continue;
       const location = route(destination);
-      if (location.classId && location.type !== 'task') {
+      if (location.type === 'roster' && sourceURL(destination, url) &&
+        (enrolled.test(txt(link)) || (route(url).type === 'roster' && link.rel === 'next'))) {
+        sources.set(destination.pathname + destination.search, true);
+      }
+      if (location.classId && location.type !== 'task' && (!browsingCatalog || link.closest('nav,aside,[role="navigation"]'))) {
         const path = `/student/classes/${location.classId}/core_tasks`;
         if (location.type === 'tasks') {
           const requested = termFromURL(destination);
-          if (requested) sources.set(destination.pathname + '?' + new URLSearchParams([[requested.name, requested.id]]), true);
+          if (requested && !isCurrentSelection(destination, requested.id)) sources.set(destination.pathname + '?' + new URLSearchParams([[requested.name, requested.id]]), true);
           sources.set(destination.pathname, true);
         }
-        sources.set(path, true);
+        if (location.type !== 'tasks') sources.set(path, true);
         const label = txt(link);
         if (location.type === 'overview' && label && !/^(overview|class|back)$/i.test(label)) classes[location.classId] = label;
       }
@@ -256,14 +285,41 @@
         }
       }
     }
-    const current = route(url);
+    if (current.type === 'roster' && sourceURL(url, url)) sources.set(url.pathname + url.search, true);
+    // Class pickers may expose enrolled destinations as native select values.
+    const classChoices = browsingCatalog ? [] : doc.querySelectorAll('select option[value*="/student/classes/"]');
+    for (const option of classChoices) {
+      const target = localURL(option.getAttribute('value'), url);
+      if (!target || route(target).type !== 'overview') continue;
+      const classId = route(target).classId;
+      classes[classId] ||= txt(option);
+      sources.set(`/student/classes/${classId}/core_tasks`, true);
+    }
     if (current.classId) {
       const path = `/student/classes/${current.classId}/core_tasks`;
-      sources.set(path, true);
+      if (current.type !== 'tasks') sources.set(path, true);
       if (current.type === 'tasks') {
         const requested = termFromURL(url);
         if (requested) sources.set(url.pathname + '?' + new URLSearchParams([[requested.name, requested.id]]), true);
         sources.set(url.pathname, true);
+        for (const select of doc.querySelectorAll('select')) {
+          const form = select.closest('form');
+          const name = select.getAttribute('name');
+          const action = form && localURL(form.getAttribute('action') || url.href, url);
+          const nativeTermForm = action && route(action).type === 'tasks' && route(action).classId === current.classId &&
+            /^get$/i.test(form.getAttribute('method') || 'get') && isTermField(name);
+          for (const option of select.querySelectorAll('option[value]')) {
+            const value = option.getAttribute('value');
+            if (!termLabel.test(txt(option))) continue;
+            const target = localURL(value, url);
+            const term = target && route(target).type === 'tasks' && route(target).classId === current.classId ? termFromURL(target) : null;
+            if (term) {
+              if (!isCurrentSelection(target, term.id)) sources.set(target.pathname + '?' + new URLSearchParams([[term.name, term.id]]), true);
+            } else if (nativeTermForm && id(value) && !isCurrentSelection(action, value)) {
+              sources.set(action.pathname + '?' + new URLSearchParams([[name, value]]), true);
+            }
+          }
+        }
       }
     }
     return { sources: [...sources.keys()], classes };
@@ -282,7 +338,7 @@
     const known = [...doc.querySelectorAll(selectors.tasks)].filter(exposed);
     const nodes = new Set(known.filter((node) => !node.matches('[data-task-id], [data-assignment-id]') ||
       ['DIV', 'LI', 'ARTICLE', 'SECTION', 'TR'].includes(node.tagName)));
-    for (const link of doc.querySelectorAll('a[href]')) {
+    for (const link of doc.querySelectorAll(assessmentLinks)) {
       const destination = localURL(link.getAttribute('href'), url);
       if (!destination || route(destination).type !== 'task' || !exposed(link) ||
         link.closest(selectors.tasks)) continue;
@@ -338,6 +394,8 @@
     }
     const first = parsed[0];
     const scoreMatch = first && parsed.every((match) => match?.[0] === first[0] && match?.[1] === first[1]) ? first : null;
+    const explicitlyUngraded = Boolean(score?.matches('[data-graded="false"]') || node.matches('[data-graded="false"]'));
+    const excluded = node.matches('[data-grade-eligible="false"],[data-counts-toward-grade="false"]');
     const result = {
       id: match[3], classId, subject, termId, category, assessmentType,
       title: txt(link) || `Assessment ${match[3]}`,
@@ -347,9 +405,12 @@
       status: firstText(node, '.submission-status, .task-status') ||
         (txt(score).match(/\b(not submitted|submitted|pending|ungraded)\b/i)?.[0] ?? ''),
       taskUrl: destination.pathname,
-      issue: null
+      excluded, explicitlyUngraded, issue: null
     };
-    if (!app.validScore(result)) {
+    if (explicitlyUngraded) {
+      result.earnedPoints = null;
+      result.maxPoints = null;
+    } else if (!app.validScore(result)) {
       if (points.length || (result.displayedLetter && !/^(?:n\/a|pending|ungraded|[—–-])$/i.test(result.displayedLetter))) result.issue = 'Points unavailable or invalid';
       result.earnedPoints = null;
       result.maxPoints = null;
@@ -359,11 +420,28 @@
     return result;
   }
 
+  function readScoreChanges(url, previous, rows) {
+    if (!previous || previous.context.type !== 'tasks' || !previous.term.id || !rows?.size) return null;
+    const existing = new Map(previous.records.map((task) => [task.id, task]));
+    const updates = [];
+    const seen = new Set();
+    for (const row of rows) {
+      if (!row.isConnected || !exposed(row)) return null;
+      const task = readTask(row, url, previous.context, previous.term, previous.classes, previous.weights);
+      const old = existing.get(task?.id);
+      if (!old || old.termId !== task.termId || old.issue === 'Conflicting assessment records' || seen.has(task.id)) return null;
+      seen.add(task.id);
+      if (JSON.stringify(old) === JSON.stringify(task)) continue;
+      updates.push(task);
+    }
+    return updates;
+  }
+
   function scan(doc, url) {
     const context = route(url);
     const surface = context.type === 'tasks' ? taskSurface(doc) : {};
     const term = pageTerm(doc, url, surface);
-    const found = discover(doc, url);
+    const found = discover(doc, url, term.id);
     const weights = readWeights(doc);
     const scale = readScale(doc);
     const records = new Map();
@@ -426,5 +504,5 @@
     };
   }
 
-  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, scan, workspacePath, studentPath, heading, taskSurface, termFromURL });
+  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, discoveryLinks });
 })();

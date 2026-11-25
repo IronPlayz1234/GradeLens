@@ -146,3 +146,63 @@ test('reads a portaled native term menu and retains verified evidence when that 
   doc.querySelector('[role="combobox"]').textContent = 'Semester 2';
   assert.equal(app.scan(doc, tasksURL).term.id, null);
 });
+
+test('discover enrolled roster pages and real term form links without scheduling school catalog or foreign links', () => {
+  const doc = parseHTML(`<html><body><nav>
+    <a href="/student/classes">My Classes</a><a href="/student/classes?tab=all">Browse All Classes</a>
+    <a href="/student/classes?tab=my_classes&amp;page=2" rel="next">Next</a>
+    <select><option value="/student/classes/44">PE</option></select>
+    <a href="https://other.invalid/student/classes/46">Foreign</a></nav>
+    <a href="/student/classes/55">Mathematics</a></body></html>`).document;
+  const roster = new URL(host + '/student/classes');
+  const snapshot = app.scan(doc, roster);
+  assert.deepEqual(snapshot.classes, { 44: 'PE', 55: 'Mathematics' });
+  assert.ok(snapshot.sources.includes('/student/classes?tab=my_classes&page=2'));
+  assert.ok(snapshot.sources.includes('/student/classes/44/core_tasks'));
+  assert.equal(app.sourceURL('/student/classes?tab=all', roster), null);
+  assert.deepEqual(app.scan(doc, new URL(roster + '?tab=all')).classes, {});
+  const classDoc = fixture('class-tasks');
+  const term = classDoc.querySelector('select[name="term_id"]');
+  const form = classDoc.createElement('form');
+  term.before(form);
+  form.setAttribute('action', tasksURL.pathname);
+  form.append(term);
+  assert.ok(app.scan(classDoc, tasksURL).sources.includes(tasksURL.pathname + '?term_id=72'));
+  form.setAttribute('method', 'post');
+  assert.ok(!app.scan(classDoc, tasksURL).sources.includes(tasksURL.pathname + '?term_id=72'));
+});
+
+test('PE uses its own cached term and retains points and weights on partial or empty background reads', () => {
+  const doc = fixture('class-tasks');
+  const cache = app.freshCache();
+  const source = app.scan(doc, tasksURL);
+  const pe = { ...source, classes: { 123: 'Physical Education AS' }, records: source.records.slice(0, 2).map((record, index) => ({
+    ...record, title: ['Push Ups', '1 mile run'][index], earnedPoints: 100, maxPoints: 100
+  })), visible: true, at: 10 };
+  app.mergeScan(cache, pe);
+  const read = () => {
+    const subject = cache.classes['123'];
+    const bucket = subject.terms[app.classTermKey(subject)];
+    return app.calculate(Object.values(bucket.records), bucket.weights);
+  };
+  assert.equal(read().percentage, 100);
+  app.mergeScan(cache, { ...pe, term: { id: '8', label: 'Semester 1' },
+    defaultTerm: true, visible: false, at: 20, records: [], complete: false, weights: {} });
+  app.mergeScan(cache, { ...pe, defaultTerm: true, visible: false, at: 30, records: [], weights: {} });
+  app.mergeScan(cache, { ...pe, visible: false, at: 32, complete: false,
+    records: [{ ...pe.records[0], earnedPoints: null, maxPoints: 100, explicitlyUngraded: true }], weights: {} });
+  assert.equal(read().count, 2);
+  assert.equal(read().percentage, 100);
+  assert.equal(cache.classes['123'].terms['term:71'].lastScan, 10);
+});
+
+test('explicit grade eligibility and graded state are independent of submission status', () => {
+  const doc = fixture('class-tasks');
+  doc.querySelector('#task-one [class*="assessment-cell"]').setAttribute('data-graded', 'false');
+  doc.querySelectorAll('.short-assignment')[1].setAttribute('data-counts-toward-grade', 'false');
+  const snapshot = app.scan(doc, tasksURL);
+  assert.equal(snapshot.records[0].earnedPoints, null);
+  assert.equal(snapshot.records[0].explicitlyUngraded, true);
+  assert.equal(snapshot.records[1].excluded, true);
+  assert.equal(app.calculate(snapshot.records, snapshot.weights).count, 2);
+});

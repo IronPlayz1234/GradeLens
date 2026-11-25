@@ -40,7 +40,7 @@
     const missing = [];
     const breakdown = [];
     for (const [id, category] of categories) {
-      const graded = category.tasks.filter(validScore);
+      const graded = category.tasks.filter((task) => validScore(task) && !task.excluded);
       const override = Object.hasOwn(overrides, id) ? overrides[id] : null;
       const simulated = validWeight(override);
       const taskCount = simulated ? Math.max(1, graded.length) : graded.length;
@@ -66,7 +66,8 @@
     return {
       percentage: denominator && !missing.length ? numerator / denominator : null,
       count, weightedCount, missing, breakdown,
-      ungraded: tasks.length - count,
+      ungraded: tasks.filter((task) => !validScore(task)).length,
+      excluded: tasks.filter((task) => task.excluded && validScore(task)).length,
       flagged: tasks.filter((task) => task.issue).length
     };
   }

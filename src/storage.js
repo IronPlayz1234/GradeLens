@@ -3,7 +3,7 @@ importScripts('core/grades.js', 'core/cache.js');
 const app = globalThis.MBGC;
 const origin = 'https://uia.managebac.com';
 let pending = Promise.resolve();
-const leases = new Map();
+
 async function notify(account, originTab) {
   const tabs = await chrome.tabs.query({ url: [origin + '/student', origin + '/student/*'] });
   await Promise.allSettled(tabs.filter((tab) => tab.id !== originTab).map((tab) =>
@@ -20,35 +20,42 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const overrideKey = `mbgc:overrides:${new URL(origin).host}:${account}`;
     if (message.type === 'mbgc:get') return (await chrome.storage.session.get(key))[key] ?? app.freshCache();
     if (message.type === 'mbgc:clear') {
-      await chrome.storage.session.set({ [key]: { ...app.freshCache(), clearedAt: Date.now() } });
+      const cleared = { ...app.freshCache(), clearedAt: Date.now() };
+      await chrome.storage.session.set({ [key]: cleared });
       await chrome.storage.local.remove(overrideKey);
       void notify(account, sender.tab?.id).catch(() => {});
-      return null;
+      return cleared;
     }
     if (message.type === 'mbgc:scan') {
       const stored = (await chrome.storage.session.get(key))[key] ?? app.freshCache();
+      const before = JSON.stringify(stored);
       for (const snapshot of message.snapshots) {
         if (!stored.clearedAt || snapshot.at > stored.clearedAt) app.mergeScan(stored, snapshot);
       }
-      await chrome.storage.session.set({ [key]: stored });
-      void notify(account, sender.tab?.id).catch(() => {});
+      for (const check of message.checks ?? []) {
+        if (!stored.clearedAt || check.at > stored.clearedAt) app.mergeCheck(stored, check);
+      }
+      if (before !== JSON.stringify(stored)) {
+        stored.revision = (stored.revision ?? 0) + 1;
+        await chrome.storage.session.set({ [key]: stored });
+        void notify(account, sender.tab?.id).catch(() => {});
+      }
       return stored;
     }
-    if (message.type === 'mbgc:lease') {
+    if (message.type === 'mbgc:lease' || message.type === 'mbgc:release') {
+      const leaseKey = key + ':lease';
+      const refreshKey = key + ':refresh';
+      const stored = await chrome.storage.session.get([leaseKey, refreshKey]);
+      const lease = stored[leaseKey];
+      if (message.type === 'mbgc:release') {
+        if (lease?.token === message.token && lease.owner === sender.tab?.id) await chrome.storage.session.remove(leaseKey);
+        return null;
+      }
       const now = Date.now();
-      const lease = leases.get(key);
-      if (lease && now < lease.until) return false;
-      const leaseKey = key + ':refresh';
-      const last = (await chrome.storage.session.get(leaseKey))[leaseKey] ?? 0;
-      if (!message.manual && now - last < message.interval) return false;
-      if (message.manual && now - last < 10000) return false;
-      leases.set(key, { owner: sender.tab?.id, until: now + 130000 });
-      await chrome.storage.session.set({ [leaseKey]: now });
-      return true;
-    }
-    if (message.type === 'mbgc:release') {
-      if (leases.get(key)?.owner === sender.tab?.id) leases.delete(key);
-      return null;
+      if (lease?.until > now || now - (stored[refreshKey] ?? 0) < (message.manual || message.hasNewSources ? 3000 : message.interval)) return null;
+      const token = crypto.randomUUID();
+      await chrome.storage.session.set({ [refreshKey]: now, [leaseKey]: { token, owner: sender.tab?.id, until: now + 95000 } });
+      return token;
     }
     throw new Error('Unrecognized storage operation.');
   });

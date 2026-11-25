@@ -85,3 +85,27 @@ test('category overrides are separate assumptions and use the modeled count for 
   assert.equal(result.breakdown.find((item) => item.name === 'Semester Exam').simulated, true);
   assert.equal(tasks.length, 4);
 });
+
+test('ungraded rows never enter the arithmetic of any grading method', () => {
+  const eligible = [[13, 30], [22, 24], [15, 30], [17, 20]]
+    .map(([earned, max], id) => task('Coursework', earned, max, String(id)));
+  const pending = Array.from({ length: 8 }, (_, index) => ({ id: 'pending-' + index,
+    category: 'Coursework', earnedPoints: null, maxPoints: 20, status: 'Pending' }));
+  const invalid = { ...task('Coursework', NaN, 20, 'invalid'), issue: 'Points unavailable or invalid' };
+  const excludedFormative = { ...task('Coursework', 0, 10, 'excluded'), assessmentType: 'Formative', excluded: true };
+  const configuration = { Coursework: 100 };
+  for (const method of ['percentage', 'points', 'absolute']) {
+    const base = calculate(eligible, configuration, method);
+    const expanded = calculate([...eligible, ...pending, invalid, excludedFormative], configuration, method);
+    nearly(base.percentage, method === 'points' ? 100 * 67 / 104 : 67.5);
+    nearly(expanded.percentage, base.percentage);
+    assert.equal(expanded.ungraded, 9);
+    assert.equal(expanded.flagged, 1);
+    assert.equal(expanded.excluded, 1);
+    assert.equal(expanded.count, 4);
+    const zero = calculate([...eligible, { ...task('Coursework', 0, 10, 'zero'), assessmentType: 'Formative' }],
+      configuration, method);
+    assert.equal(zero.count, 5);
+    assert.ok(zero.percentage < base.percentage);
+  }
+});
