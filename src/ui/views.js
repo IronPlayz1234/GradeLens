@@ -86,6 +86,13 @@
     details.addEventListener('toggle', () => { view.diagnosticsOpen = details.open; });
     details.append(h('summary', '', 'Sync details', h('span', 'mbgc-chevron', icon('chevron'))));
     details.append(h('p', 'mbgc-muted', 'Extension version ' + chrome.runtime.getManifest().version));
+    const upcoming = Object.values(sync.cache.sourceChecks ?? {}).filter((check) => check.upcomingCoverage)
+      .sort((a, b) => b.at - a.at)[0];
+    const read = upcoming?.upcomingRead;
+    details.append(h('p', 'mbgc-muted', read
+      ? `Upcoming check · ${read.mode} · ${read.rows} candidate rows · ${read.dated} recognized deadlines${upcoming.renderedAt && read.mode !== 'rendered page' ? ' · rendered read unavailable' : ''}`
+      : upcoming ? 'Upcoming check · Tasks & Deadlines could not be read.'
+        : 'Upcoming check · Tasks & Deadlines has not been checked yet.'));
     const storage = sync.storageState === 'session' ? 'Verified student grade cache' :
       sync.storageState === 'unavailable' ? 'Grade cache unavailable · current document only' :
         'Current document only · student identity could not be verified';

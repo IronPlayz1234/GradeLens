@@ -251,8 +251,9 @@
       const signature = JSON.stringify({ ...verified, at: 0, route: url.pathname + url.search });
       if (signature !== this.signature || this.storageState === 'unavailable') {
         this.signature = signature;
-        const checks = verified.upcomingCoverage === 'complete' && !verified.loading ? [{
-          source: url.pathname + url.search, upcomingCoverage: 'complete', termId: verified.term.id, at: verified.at
+        const checks = verified.upcomingCoverage && !verified.loading ? [{
+          source: url.pathname + url.search, upcomingCoverage: verified.upcomingCoverage, termId: verified.term.id, at: verified.at,
+          upcomingRead: { mode: 'open page', rows: verified.diagnostic.candidates, dated: verified.records.filter((task) => task.due !== undefined).length }
         }] : [];
         await this.apply([verified], checks);
       }
@@ -408,12 +409,13 @@
         }
         if (checkUpcoming) {
           check.upcomingCoverage = snapshot.upcomingCoverage ?? 'unavailable';
+          check.upcomingRead = { mode: 'background HTML', rows: snapshot.diagnostic.candidates,
+            dated: snapshot.records.filter((task) => task.due !== undefined).length };
           const hasUpcomingLink = app.workspaceFilter(page.url) !== 'upcoming' && snapshot.sources.some((source) =>
             app.workspaceFilter(new URL(source, page.url)) === 'upcoming');
           const control = app.upcomingControl(html);
           renderedCandidate = !hasUpcomingLink && check.upcomingCoverage !== 'complete' &&
-            (check.upcomingCoverage === 'unavailable' || (control && !app.activeUpcoming(control))) &&
-            Boolean(html.querySelector(scriptSelector));
+            Boolean(control || html.querySelector(scriptSelector));
         }
         if (error) snapshot.complete = false;
         if (snapshot.diagnostic.loading) {
@@ -550,7 +552,8 @@
       const urls = this.sources();
       const now = Date.now();
       const needsWorkspaceCheck = (source, url) => app.route(url).type === 'workspace' &&
-        app.workspaceFilter(url) !== 'past' && !this.cache.sourceChecks?.[source]?.upcomingCoverage;
+        app.workspaceFilter(url) !== 'past' && (!this.cache.sourceChecks?.[source]?.upcomingCoverage ||
+          (this.cache.sourceChecks[source].upcomingRead?.mode === 'open page' && this.cache.sourceChecks[source].upcomingCoverage !== 'complete'));
       if (!manual) for (const [source, url] of urls) {
         const checkedAt = this.cache.sourceChecks?.[source]?.at;
         if (checkedAt && now - checkedAt < interval && !needsWorkspaceCheck(source, url)) urls.delete(source);
@@ -674,7 +677,9 @@
               if (check.error) failures--;
               await this.apply([rendered], [{ ...check, at: rendered.at, error: undefined,
                 termId: rendered.term.id, renderedAt: rendered.at, renderedCandidate: false, complete: rendered.complete,
-                upcomingCoverage: rendered.upcomingCoverage ?? check.upcomingCoverage }]);
+                upcomingCoverage: rendered.upcomingCoverage ?? check.upcomingCoverage,
+                upcomingRead: check.upcomingCoverage ? { mode: 'rendered page', rows: rendered.diagnostic.candidates,
+                  dated: rendered.records.filter((task) => task.due !== undefined).length } : undefined }]);
               discover(rendered);
             } else {
               const at = Date.now();
