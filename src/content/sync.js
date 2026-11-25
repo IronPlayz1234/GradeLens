@@ -148,6 +148,7 @@
       this.pendingChecks = [];
       this.storageState = next ? 'checking' : 'document';
       this.message = '';
+      this.refreshIssue = false;
       this.lastAttempt = 0;
       this.diagnostics = null;
       this.lastPage = '';
@@ -503,6 +504,7 @@
       if (!account || this.storageState === 'unavailable') {
         if (manual && !this.accountChanged && !account) {
           this.message = 'Background refresh needs a verifiable student account. Grades on this tab remain available.';
+          this.refreshIssue = true;
           this.update();
         }
         return;
@@ -522,12 +524,16 @@
       this.cancel = controller;
       this.manualRefresh = manual;
       this.message = manual ? 'Checking student-visible pages…' : '';
+      this.refreshIssue = false;
       this.update();
       let token;
       try {
         token = await request('lease', account, { manual, interval, hasNewSources });
         if (!token) {
-          if (manual) this.message = 'Another tab is refreshing grades or a refresh just finished.';
+          if (manual) {
+            this.message = 'Another tab is refreshing grades or a refresh just finished.';
+            this.refreshIssue = true;
+          }
           return;
         }
         const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(75000)]);
@@ -541,6 +547,7 @@
           this.identityStatus = 'profile-unverified';
           await this.identify(null);
           this.message = 'The signed-in profile could not be reverified. Refresh to check it again.';
+          this.refreshIssue = true;
           return false;
         };
         if (!await confirmAccount()) return;
@@ -663,6 +670,7 @@
         }
         if (!controller.signal.aborted && account === this.account) await flush();
         if (signal.aborted || account !== this.account) return;
+        this.refreshIssue = Boolean(failures || pending.length || renderedChecks.length);
         if (manual || failures || pending.length || renderedChecks.length) this.message = [
           checked ? `Checked ${checked} student pages.` : 'Background refresh found no new usable data.',
           unchanged ? `${unchanged} unchanged.` : '',
@@ -670,7 +678,10 @@
           (pending.length || renderedChecks.length) ? 'Remaining pages will be checked on a later refresh.' : ''
         ].filter(Boolean).join(' ');
       } catch {
-        if (!controller.signal.aborted) this.message = 'Refresh could not finish. Cached records were kept.';
+        if (!controller.signal.aborted) {
+          this.message = 'Refresh could not finish. Cached records were kept.';
+          this.refreshIssue = true;
+        }
       } finally {
         if (token) await request('release', account, { token, aborted: controller.signal.aborted }).catch(() => {});
         this.refreshing = false;

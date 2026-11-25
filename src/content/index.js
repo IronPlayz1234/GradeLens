@@ -149,6 +149,33 @@
     themeKey = '';
   }
 
+  function updateClassBadges() {
+    const scope = ':is(aside,nav,[role="navigation"],.sidebar)';
+    for (const link of document.querySelectorAll(scope + ' a[href*="/student/classes/"], a:has(> .mbgc-sidebar-grade)')) {
+      const badge = link.querySelector(':scope > .mbgc-sidebar-grade');
+      const url = app.localURL(link.getAttribute('href'), location.href);
+      const route = url && app.route(url);
+      const enrolledLink = (route?.type === 'overview' || route?.type === 'tasks') && link.closest(scope) &&
+        (!link.closest(mainSelector) || link.closest('aside,.sidebar'));
+      const entry = enrolledLink && sync.cache.classes[route.classId];
+      const nativeTerm = url && app.termFromURL(url)?.id;
+      const term = nativeTerm ? 'term:' + nativeTerm :
+        view.term && view.term !== app.currentTerms && view.term !== 'unknown' ? view.term : app.classTermKey(entry);
+      const data = entry && app.gradeData(sync, route.classId, term);
+      const letter = data && app.letter(data.result.percentage, data.scale);
+      if (!letter) {
+        badge?.remove();
+        continue;
+      }
+      if (badge?.dataset.letter === letter) continue;
+      const next = badge ?? app.h('span', 'mbgc-owned mbgc-sidebar-grade');
+      next.dataset.letter = letter;
+      next.setAttribute('role', 'img');
+      next.setAttribute('aria-label', 'Calculated grade ' + letter);
+      if (!badge) link.append(next);
+    }
+  }
+
   function placeCard(type) {
     if (type === 'tasks') {
       const { title, section, chart } = app.taskSurface(document);
@@ -234,6 +261,7 @@
     if (!app.studentPath(location.pathname)) {
       unmountDashboard();
       card.remove();
+      for (const badge of document.querySelectorAll('.mbgc-sidebar-grade')) badge.remove();
       for (const item of nav) (item.closest('.mbgc-nav-shell') ?? item).remove();
       return;
     }
@@ -263,7 +291,8 @@
     if (panel) {
       card.remove();
       mountDashboard();
-      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.refreshing, sync.message, sync.diagnostics, sync.storageState, sync.account, sync.identityStatus, [...changed]]);
+      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.refreshing, sync.refreshIssue,
+        sync.message, sync.diagnostics, sync.storageState, sync.account, sync.identityStatus, [...changed]]);
       if (force || viewKey !== contentKey) {
         const editor = stageHost.shadowRoot?.activeElement ?? document.activeElement;
         if (!force && editor?.matches('textarea') && stage.contains(editor)) return;
@@ -285,8 +314,10 @@
         }
         viewKey = contentKey;
       }
+      updateClassBadges();
       wasViewing = true;
     } else {
+      updateClassBadges();
       unmountDashboard();
       viewKey = '';
       renderedView = null;

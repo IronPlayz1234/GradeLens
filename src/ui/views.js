@@ -11,7 +11,9 @@
     book: 'M5 4h13a1 1 0 0 1 1 1v15H6a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1Zm0 12h14M8 8h7',
     plus: 'M12 5v14M5 12h14',
     target: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-5h.01',
-    clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-14v5l3 2'
+    clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-14v5l3 2',
+    info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 11v5m0-8h.01',
+    alert: 'M10.3 4.6 2.6 18a1.6 1.6 0 0 0 1.4 2.4h16a1.6 1.6 0 0 0 1.4-2.4L13.7 4.6a2 2 0 0 0-3.4 0ZM12 9v4m0 3h.01'
   };
   function icon(name) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -64,9 +66,9 @@
     if (!['tasks', 'workspace'].includes(scan.page)) return sync.cache.lastSync ? '' :
       (sync.account ? 'Checking available class pages for grades.' : 'Student identity unavailable. Only this page’s grades can be used.');
     if (!scan.parsed) return scan.candidates
-      ? 'Task elements were found, but their stable assessment links could not be read. Check Sync diagnostics.'
+      ? 'Task elements were found, but their stable assessment links could not be read. Check Sync details.'
       : 'No assessment rows detected on this page. Load the native task list or open Tasks & Deadlines → Past.';
-    if (scan.page === 'tasks' && !scan.term) return 'The selected class term has no recognized identifier. Switch terms in the native selector and check Sync diagnostics.';
+    if (scan.page === 'tasks' && !scan.term) return 'The selected class term has no recognized identifier. Switch terms in the native selector and check Sync details.';
     if (!scan.points) return scan.scoreIssues
       ? 'Grades are displayed, but no usable earned and maximum points were detected. Letter grades or rubric criteria alone cannot produce a percentage.'
       : 'Assessments were read. No graded points are available yet.';
@@ -80,7 +82,7 @@
     const details = h('details', 'mbgc-overrides mbgc-diagnostics');
     details.open = Boolean(view.diagnosticsOpen);
     details.addEventListener('toggle', () => { view.diagnosticsOpen = details.open; });
-    details.append(h('summary', '', 'Sync diagnostics'));
+    details.append(h('summary', '', 'Sync details', h('span', 'mbgc-chevron', icon('chevron'))));
     details.append(h('p', 'mbgc-muted', 'Extension version ' + chrome.runtime.getManifest().version));
     const storage = sync.storageState === 'session' ? 'Verified student grade cache' :
       sync.storageState === 'unavailable' ? 'Grade cache unavailable · current document only' :
@@ -104,6 +106,9 @@
     }
     if (!sync.account) details.append(h('p', 'mbgc-muted',
       'Open Overall Grades or Grade Estimator from the sidebar while still on the Class Tasks page to use the current document’s data.'));
+    const currentPageStatus = syncStatus(sync);
+    if (currentPageStatus) details.append(h('p', 'mbgc-muted', currentPageStatus));
+    if (sync.message) details.append(h('p', 'mbgc-muted', sync.message));
     return details;
   }
 
@@ -199,7 +204,8 @@
         if (task.taskUrl) title.href = task.taskUrl;
         row.append(h('div', 'mbgc-assessment',
           h('div', '', title, h('small', 'mbgc-muted', [task.assessmentType, task.scenario ? 'Hypothetical' : '', task.issue || task.status].filter(Boolean).join(' · '))),
-          h('span', 'mbgc-assessment-score', app.validScore(task) ? `${task.earnedPoints} / ${task.maxPoints}` :
+          h('span', 'mbgc-assessment-score', app.validScore(task) ?
+            [`${task.earnedPoints} / ${task.maxPoints}`, h('small', 'mbgc-muted', percent(100 * task.earnedPoints / task.maxPoints))] :
             task.gradeKind === 'rubric' ? 'Rubric only' :
               task.gradeKind === 'letter' ? task.displayedLetter + ' (letter only)' :
                 task.issue ? 'Points unavailable' : 'Ungraded')));
@@ -213,15 +219,42 @@
     return list;
   }
 
-  function labelStatus(data) {
-    if (data.error) return 'Couldn’t refresh';
-    if (data.stale) return 'Last sync out of date';
-    if (!data.verified) return 'Term unavailable';
-    if (data.result.missing.length) return 'Category weights needed';
-    if (data.result.flagged) return 'Assessments need review';
-    if (!data.bucket.complete) return 'Task list unverified';
-    if (data.customWeights) return 'Custom weights';
-    return data.result.count ? 'Up to date' : 'No graded assessments';
+  function gradeNotice(data) {
+    return [
+      data.error && 'We couldn’t refresh this class.',
+      data.stale && 'This grade hasn’t been updated recently.',
+      data.verified && !data.bucket.complete && 'Some assignments may not have been included.',
+      data.result.flagged > 0 && 'Some assessments need a score or category checked.',
+      data.customWeights && 'This estimate uses your custom category weights.',
+      data.missing
+    ].filter(Boolean).join(' ');
+  }
+
+  function gradeInfo(data, id) {
+    const message = gradeNotice(data);
+    if (!message) return null;
+    const tip = h('span', 'mbgc-info-tip', message);
+    tip.id = id;
+    tip.setAttribute('role', 'tooltip');
+    const trigger = button('', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const info = event.currentTarget.parentElement;
+      info.classList.remove('mbgc-info-dismissed');
+      info.classList.toggle('mbgc-info-open');
+    }, data.error ? 'alert' : 'info', 'mbgc-info-button');
+    trigger.setAttribute('aria-label', data.error ? 'Refresh failed. Grade details' : 'About this grade');
+    trigger.setAttribute('aria-describedby', id);
+    trigger.addEventListener('blur', () => trigger.parentElement.classList.remove('mbgc-info-open', 'mbgc-info-dismissed'));
+    trigger.addEventListener('pointerenter', () => trigger.parentElement.classList.remove('mbgc-info-dismissed'));
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        trigger.parentElement.classList.remove('mbgc-info-open');
+        trigger.parentElement.classList.add('mbgc-info-dismissed');
+      }
+    });
+    return h('span', 'mbgc-info' + (data.error ? ' mbgc-info-failed' : ''), trigger, tip);
   }
 
   function compact(sync, data, type, changed) {
@@ -231,7 +264,7 @@
         h('div', '', h('h2', '', name),
           h('p', 'mbgc-muted', app.methods[sync.settings.method].label, ' · ', data.label))),
       h('div', 'mbgc-compact-result', score(data.result.percentage, data.scale),
-        h('span', 'mbgc-chip', labelStatus(data))),
+        gradeInfo(data, 'mbgc-class-grade-info')),
       h('p', 'mbgc-compact-note mbgc-muted',
         changed ? 'Grade updated · ' : '',
         data.verified ? `${data.result.count} graded assessment${data.result.count === 1 ? '' : 's'}. ` : '',
@@ -273,9 +306,9 @@
           h('div', '', h('h3', '', data.title), h('p', 'mbgc-muted',
             data.verified ? `${data.result.count} graded assessment${data.result.count === 1 ? '' : 's'} · ${data.label}` : 'Term unavailable',
             view.changed.has(data.classId + ':' + data.termKey) ? h('span', 'mbgc-updated', ' · Grade updated') : ''))),
-        h('div', 'mbgc-subject-status', h('span', 'mbgc-chip', labelStatus(data))),
         h('div', 'mbgc-subject-grade', score(data.result.percentage, data.scale),
           track(data.result.percentage, data.title + ' calculated grade')),
+        h('span', 'mbgc-subject-status', gradeInfo(data, 'mbgc-subject-info-' + data.classId)),
         h('span', 'mbgc-chevron', icon('chevron'))),
       h('div', 'mbgc-subject-detail',
         data.missing ? h('p', 'mbgc-notice', data.missing) : null,
@@ -385,9 +418,10 @@
       (id) => sync.setSettings({ method: id }));
     const refresh = button(sync.refreshing ? 'Refreshing…' : 'Refresh now', () => sync.refresh(true), 'refresh');
     refresh.disabled = sync.refreshing;
-    const syncText = h('div', 'mbgc-sync-text', icon('clock'), sync.cache.lastSync ? `Last read ${time(sync.cache.lastSync)}` :
-      sync.refreshing ? 'Checking pages' : 'No assessment data synced');
-    const state = h('p', 'mbgc-feedback', [sync.message, syncStatus(sync)].filter(Boolean).join(' '));
+    const syncText = h('div', 'mbgc-sync-text', icon(sync.refreshing ? 'refresh' : 'clock'),
+      sync.refreshing ? 'Updating grades…' : sync.cache.lastSync ? `Last updated ${time(sync.cache.lastSync)}` : 'No grades synced yet');
+    const state = h('p', 'mbgc-feedback mbgc-sync-failed',
+      sync.refreshIssue ? 'We couldn’t finish updating grades. See Sync details.' : '');
     state.setAttribute('role', 'status');
     return h('header', 'mbgc-header',
       h('div', 'mbgc-header-line',
@@ -402,21 +436,47 @@
         syncText), state, syncDiagnostics(sync, view));
   }
 
+  function gradeLoading(classCount, checkedCount) {
+    const progress = h('div', 'mbgc-loading-progress', h('span'));
+    progress.setAttribute('role', 'progressbar');
+    progress.setAttribute('aria-label', 'Grade synchronization');
+    const status = h('div', 'mbgc-loading-copy', h('h2', '', 'Getting your grades ready…'),
+      h('p', 'mbgc-muted', checkedCount
+        ? `Checked ${checkedCount} of ${classCount} classes found so far…`
+        : classCount
+        ? `Collecting assessments for ${classCount} ${classCount === 1 ? 'class' : 'classes'} found so far…`
+        : 'Finding your classes…'));
+    status.setAttribute('role', 'status');
+    const ring = h('span', 'mbgc-loading-ring', icon('grades'));
+    ring.setAttribute('aria-hidden', 'true');
+    return h('section', 'mbgc-loading', ring, status, progress);
+  }
+
   function dashboard(sync, view, handlers) {
     const termOptions = termOptionsFor(sync, view);
     const classes = Object.entries(sync.cache.classes).sort(([, a], [, b]) => (a.name || '').localeCompare(b.name || ''));
     const subjects = classes.filter(([, entry]) => view.term === app.currentTerms || entry.terms[view.term] ||
       (view.term !== 'unknown' && !Object.keys(entry.terms).some((id) => id !== 'unknown')));
-    const content = h('div', 'mbgc-page', header(sync, 'grades', view, handlers, termOptions),
+    const content = h('div', 'mbgc-page', header(sync, 'grades', view, handlers, termOptions));
+    const rows = subjects.map(([id, item]) => gradeData(sync, id,
+      view.term === app.currentTerms ? app.classTermKey(item) : view.term));
+    const hasEstimate = rows.some((data) => Number.isFinite(data.result.percentage));
+    if (!sync.context && !sync.refreshing && !sync.message) return content;
+    if (!hasEstimate && sync.refreshing) {
+      const checked = new Set(Object.values(sync.cache.sourceChecks ?? {}).filter((check) =>
+        check.at >= sync.lastAttempt && sync.cache.classes[check.classId]).map((check) => check.classId));
+      content.append(gradeLoading(classes.length, checked.size));
+      return content;
+    }
+    content.append(
       h('div', 'mbgc-section-heading', h('h2', '', 'Subjects'),
         h('span', 'mbgc-muted', `${subjects.length} ${subjects.length === 1 ? 'subject' : 'subjects'}`)));
-    if (!subjects.length) {
-      content.append(sync.refreshing && !sync.cache.lastSync
-        ? h('div', 'mbgc-skeleton', h('span'), h('span'), h('span'))
-        : empty('No grades for this term yet', 'Open Class Tasks or Tasks & Deadlines → Past, then load any additional tasks and refresh.'));
-    } else {
-      content.append(h('div', 'mbgc-subjects', subjects.map(([id, item]) => subjectRow(sync, gradeData(sync, id,
-        view.term === app.currentTerms ? app.classTermKey(item) : view.term), view))));
+    if (rows.length) content.append(h('div', 'mbgc-subjects', rows.map((data) => subjectRow(sync, data, view))));
+    if (!hasEstimate) {
+      const recovery = empty('No grade estimates for this term yet',
+        'Check Sync details or try again. Grades appear when there are enough scored assessments and category weights.');
+      recovery.append(button('Retry', () => sync.refresh(true), 'refresh'));
+      content.append(recovery);
     }
     content.append(h('p', 'mbgc-footnote', 'The school’s term calculation method and letter scale are unverified. Partial scans can miss assessments.'),
       settings(sync, classes.map(([id, item]) => [id, item.name || 'Class ' + id]), view));
@@ -426,7 +486,7 @@
   function patchDashboard(current, next) {
     const liveList = current?.querySelector('.mbgc-subjects');
     const nextList = next.querySelector('.mbgc-subjects');
-    if (!liveList || !nextList) return false;
+    if (!liveList || !nextList || current.children.length !== next.children.length) return false;
     const previous = new Map([...liveList.children].map((row) => [row.dataset.classId, row]));
     let position = liveList.firstElementChild;
     for (const row of [...nextList.children]) {
@@ -494,11 +554,10 @@
     }
     const model = view.scenario ??= defaults();
     if (!categories.includes(model.pick)) model.pick = firstCategory;
-    const taskOptions = () => [['', 'Add a new assessment'],
-      ...data.tasks.filter((task) => app.validScore(task) && app.key(task.category) === app.key(model.pick) &&
-        !model.entries.some((entry) => entry.id !== model.editing && entry.replaces === task.id))
-        .map((task) => [task.id, 'Replace ' + task.title])];
-    if (!taskOptions().some(([id]) => id === model.replaces)) model.replaces = '';
+    const replaceable = data.tasks.filter((task) => app.validScore(task) &&
+      categories.some((name) => app.key(name) === app.key(task.category)) &&
+      !model.entries.some((entry) => entry.id !== model.editing && entry.replaces === task.id));
+    if (!replaceable.some((task) => task.id === model.replaces)) model.replaces = '';
     if (!data.scale.some(([, label]) => label === model.targetLetter)) model.targetLetter = defaults().targetLetter;
 
     const category = select(categories.map((name) => [name, name]), model.pick, (name) => {
@@ -507,16 +566,26 @@
       model.replaces = '';
       handlers.render();
     });
-    const replacing = select(taskOptions(), model.replaces, (id) => {
-      model.replaces = id;
+    function selectAssessment(task) {
       model.previewPaused = false;
-      const task = data.tasks.find((item) => item.id === id);
       if (task) {
+        model.replaces = task.id;
+        model.pick = categories.find((name) => app.key(name) === app.key(task.category));
         model.max = task.maxPoints;
         model.points = task.earnedPoints;
-      }
+      } else model.replaces = '';
       handlers.render();
-    });
+    }
+    const replacing = select(replaceable.map((task) => [task.id, task.title]), model.replaces,
+      (id) => selectAssessment(replaceable.find((task) => task.id === id)));
+    const futureMode = button('Try a future grade', () => selectAssessment(null), 'plus');
+    const changeMode = button('Change an existing grade', () => selectAssessment(replaceable[0]), 'estimator');
+    futureMode.setAttribute('aria-pressed', String(!model.replaces));
+    changeMode.setAttribute('aria-pressed', String(Boolean(model.replaces)));
+    changeMode.disabled = !replaceable.length;
+    const mode = h('div', 'mbgc-mode', futureMode, changeMode);
+    mode.setAttribute('role', 'group');
+    mode.setAttribute('aria-label', 'What would you like to do?');
     const points = numericInput(model.points, 0, model.max);
     const max = numericInput(model.max, 0.01, 1000000);
     const slider = h('input', 'mbgc-slider');
@@ -527,6 +596,7 @@
     const predictedScore = h('div', 'mbgc-predicted-score');
     predictedScore.setAttribute('aria-live', 'polite');
     const predictedTrack = track(null, 'Predicted grade', 'mbgc-track-large');
+    const difference = h('p', 'mbgc-grade-difference');
     const detailsContent = h('div', 'mbgc-estimator-breakdown');
     const targetResult = h('div', 'mbgc-target-result');
     targetResult.setAttribute('aria-live', 'polite');
@@ -558,9 +628,6 @@
       const base = app.withHypotheticals(data.tasks, entries);
       const simulated = app.withHypotheticals(base, usable && !model.previewPaused ? [input] : []);
       const result = app.calculate(simulated, data.weights, sync.settings.method, model.overrides);
-      const target = model.targetMode === 'letter' ? data.scale.find(([, label]) => label === model.targetLetter)?.[0] : model.target;
-      const required = app.targetScore({ tasks: base, weights: data.weights, method: sync.settings.method,
-        overrides: model.overrides, future: input, target });
       const governedByOverride = Object.hasOwn(model.overrides, app.key(model.pick));
       sliderValue.textContent = usable ? percent(100 * model.points / model.max) : '—';
       slider.style.setProperty('--mbgc-progress', usable ? (100 * model.points / model.max) + '%' : '0%');
@@ -568,8 +635,17 @@
         governedByOverride ? 'Remove the category override to model an individual score in this category.' : '';
       predictedScore.replaceChildren(score(usable ? result.percentage : null, data.scale));
       updateTrack(predictedTrack, usable ? result.percentage : null);
+      const change = usable && result.percentage !== null && data.result.percentage !== null
+        ? Number((result.percentage - data.result.percentage).toFixed(2)) : null;
+      difference.textContent = change === null ? '' : change === 0 ? 'No change in percentage points' :
+        `${change > 0 ? '+' : '−'}${percentageFormat.format(Math.abs(change))} percentage points`;
+      difference.dataset.direction = change > 0 ? 'up' : change < 0 ? 'down' : '';
       add.disabled = !usable;
-      detailsContent.replaceChildren(usable ? categoryDetails(result, simulated) : h('p', 'mbgc-muted', 'Enter valid points to preview the breakdown.'));
+      if (breakdown.open) detailsContent.replaceChildren(usable ? categoryDetails(result, simulated) : h('p', 'mbgc-muted', 'Enter valid points to preview the breakdown.'));
+      if (!targetDetails.open) return;
+      const target = model.targetMode === 'letter' ? data.scale.find(([, label]) => label === model.targetLetter)?.[0] : model.target;
+      const required = app.targetScore({ tasks: base, weights: data.weights, method: sync.settings.method,
+        overrides: model.overrides, future: input, target });
       const inactive = result.breakdown.filter((item) => item.weight > 0 && !item.taskCount).map((item) => item.name);
       const label = Number.isFinite(target) ? `Target ${model.targetMode === 'letter' ? model.targetLetter + ' · ' : ''}${percent(target)}` : 'Enter a target';
       targetResult.dataset.state = required.state;
@@ -580,7 +656,7 @@
         explanation = 'Check the target, points, and category weights. A category override makes its individual task score unavailable.';
       } else if (required.state === 'impossible') {
         title = 'Target out of reach';
-        explanation = `Full marks on this assessment would predict ${percent(required.predicted)} overall.`;
+        explanation = `Full marks on this assessment would bring the prediction to ${percent(required.predicted)}. Additional assessments could change that result.`;
       } else {
         const minimum = Math.min(model.max, Math.ceil((required.required - 1e-10) * 100) / 100);
         title = required.state === 'achieved' ? 'Already within reach at 0 points' : `${number(minimum, 6)} / ${number(model.max, 6)} points`;
@@ -593,11 +669,13 @@
     }
 
     points.addEventListener('input', () => {
+      model.previewPaused = false;
       model.points = points.value === '' ? NaN : points.valueAsNumber;
       if (Number.isFinite(model.points)) slider.value = 100 * model.points / model.max;
       update();
     });
     max.addEventListener('input', () => {
+      model.previewPaused = false;
       model.max = max.value === '' ? NaN : max.valueAsNumber;
       points.max = Number.isFinite(model.max) ? model.max : '';
       if (Number.isFinite(model.max) && model.max > 0) slider.value = 100 * model.points / model.max;
@@ -605,26 +683,22 @@
     });
     slider.addEventListener('input', () => {
       if (!Number.isFinite(model.max) || model.max < .01 || model.max > 1000000) return;
+      model.previewPaused = false;
       model.points = Number((slider.valueAsNumber * model.max / 100).toPrecision(12));
       points.value = model.points;
       update();
     });
-    const add = button(model.editing ? 'Save hypothetical' : 'Add hypothetical', () => {
+    const add = button(model.editing ? 'Save prediction' : 'Add to prediction', () => {
       if (!app.validScore(draft()) || !max.checkValidity()) return;
       const task = draft();
       if (!model.editing) view.nextId++;
       model.entries = [...model.entries.filter((entry) => entry.id !== model.editing), task];
+      view.scenariosOpen = true;
       delete model.editing;
       model.replaces = '';
       model.previewPaused = true;
       handlers.render();
     }, 'plus', 'mbgc-primary');
-    for (const input of [points, max, slider]) input.addEventListener('input', () => {
-      if (model.previewPaused) {
-        model.previewPaused = false;
-        update();
-      }
-    });
     const scenarios = h('div', 'mbgc-scenarios',
       model.entries.map((task) => h('div', 'mbgc-scenario',
         h('div', '', h('strong', '', task.title), h('small', 'mbgc-muted', `${task.earnedPoints} / ${task.maxPoints}`)),
@@ -638,8 +712,17 @@
           if (model.editing === task.id) { delete model.editing; model.replaces = ''; }
           handlers.render();
         }))));
-    const overrideDetails = h('details', 'mbgc-overrides');
-    overrideDetails.append(h('summary', '', 'Category percentage overrides'),
+    function disclosure(title, key, ...children) {
+      const detail = h('details', 'mbgc-overrides mbgc-estimator-disclosure', h('summary', '', title), ...children);
+      detail.open = Boolean(view[key]);
+      detail.addEventListener('toggle', () => {
+        if (!detail.isConnected) return;
+        view[key] = detail.open;
+        if (detail.open && (key === 'breakdownOpen' || key === 'targetOpen')) update();
+      });
+      return detail;
+    }
+    const overrideDetails = disclosure('Category percentage overrides', 'overridesOpen',
       h('p', 'mbgc-muted', 'Enter a category average if individual scores are unavailable. Absolute Weights uses the existing graded task count, or one modeled task for an empty category.'));
     for (const name of categories) {
       const id = app.key(name);
@@ -656,33 +739,33 @@
       view.scenario = { ...defaults(), previewPaused: true };
       handlers.render();
     };
-    prediction.append(h('div', 'mbgc-prediction-top', icon('estimator'), h('span', '', 'What-if prediction')),
+    prediction.append(h('div', 'mbgc-prediction-top', icon('estimator'), h('span', '', 'Predicted overall grade')),
       predictedScore, predictedTrack,
       h('div', 'mbgc-actual', h('span', '', 'Current calculated grade'), score(data.result.percentage, data.scale)),
-      h('p', 'mbgc-muted', data.missing || labelStatus(data) + ' · ' + data.scaleLabel));
-    const breakdown = h('details', 'mbgc-overrides');
-    breakdown.open = view.breakdownOpen;
-    breakdown.addEventListener('toggle', () => { view.breakdownOpen = breakdown.open; });
-    breakdown.append(h('summary', '', 'Category breakdown'), detailsContent);
+      difference, h('p', 'mbgc-muted', gradeNotice(data)));
+    const breakdown = disclosure('Category breakdown', 'breakdownOpen', detailsContent);
+    const targetDetails = disclosure('What score do I need?', 'targetOpen',
+      h('p', 'mbgc-muted', 'Find the score this assessment would need to reach your target.'),
+      h('div', 'mbgc-form-grid', field('Target type', targetFormat),
+        model.targetMode === 'letter' ? field('Letter grade', targetLetter) : field('Target (%)', targetNumber)), targetResult);
+    const saved = disclosure('Saved predictions' + (model.entries.length ? ` (${model.entries.length})` : ''), 'scenariosOpen',
+      model.entries.length ? scenarios : h('p', 'mbgc-muted', 'Choose Add to prediction to save a score and try another.'),
+      h('div', 'mbgc-actions', button('Reset', () => { view.scenario = defaults(); handlers.render(); })));
     page.append(
       h('div', 'mbgc-estimator-grid',
         h('section', 'mbgc-panel mbgc-model',
-          h('div', 'mbgc-panel-heading', h('span', 'mbgc-mark', icon('estimator')), h('div', '', h('h2', '', 'Model an assessment'),
-            h('p', 'mbgc-muted', 'The score previews immediately. Add it to keep it in your scenario.'))),
-          h('div', 'mbgc-form-grid', field('Category', category), field('Assessment action', replacing)),
+          h('div', 'mbgc-panel-heading', h('span', 'mbgc-mark', icon('estimator')), h('div', '', h('h2', '', 'Try a grade'),
+            h('p', 'mbgc-muted', 'What would you like to do?'))),
+          mode,
+          h('p', 'mbgc-mode-help mbgc-muted', model.replaces
+            ? 'Preview a different score for an assessment you’ve already taken.'
+            : 'See how one more assessment could change your grade.'),
+          model.replaces ? field('Assessment', replacing) : field('Category', category),
           h('div', 'mbgc-form-grid', field('Earned points', points), field('Maximum points', max)),
           h('div', 'mbgc-slider-row', slider, sliderValue), warning,
-          h('div', 'mbgc-actions', add, button('Reset', () => { view.scenario = defaults(); handlers.render(); }),
-            button('Restore actual grades', restore)),
-          scenarios, overrideDetails),
-        h('div', 'mbgc-estimator-results', prediction,
-          h('section', 'mbgc-panel mbgc-target',
-            h('div', 'mbgc-panel-heading', h('span', 'mbgc-mark', icon('target')),
-              h('div', '', h('h2', '', 'Target grade'), h('p', 'mbgc-muted', 'Minimum score for the assessment modeled here.'))),
-            h('div', 'mbgc-form-grid', field('Target type', targetFormat),
-              model.targetMode === 'letter' ? field('Letter grade', targetLetter) : field('Target (%)', targetNumber)),
-            targetResult))),
-      breakdown);
+          h('div', 'mbgc-actions', add, button('Clear predictions', restore)),
+          saved, overrideDetails),
+        h('div', 'mbgc-estimator-results', prediction, targetDetails, breakdown)));
     update();
     return page;
   }

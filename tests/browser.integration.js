@@ -95,6 +95,13 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     await page.getByRole('link', { name: 'Grade Estimator' }).click();
     await waitText('.mbgc-actual .mbgc-numeral', '72.31%');
     const result = page.locator('.mbgc-predicted-score .mbgc-numeral');
+    await page.getByRole('button', { name: 'Change an existing grade' }).click();
+    await page.getByLabel('Assessment', { exact: true }).selectOption('1');
+    assert.equal(await page.getByLabel('Earned points').inputValue(), '8');
+    assert.equal(await page.getByLabel('Maximum points').inputValue(), '10');
+    assert.equal(await result.textContent(), '72.31%');
+    await page.getByRole('button', { name: 'Try a future grade' }).click();
+    await page.getByText('What score do I need?', { exact: true }).click();
     const before = await result.textContent();
     if (process.env.MBGC_ESTIMATOR_SCREENSHOT) await page.screenshot({ path: process.env.MBGC_ESTIMATOR_SCREENSHOT, fullPage: true });
     const slider = page.getByRole('slider');
@@ -102,9 +109,9 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     await page.keyboard.press('Home');
     assert.notEqual(await result.textContent(), before);
     assert.match(await page.locator('.mbgc-target-result').textContent(), /Target out of reach/);
-    await page.getByRole('button', { name: 'Add hypothetical' }).click();
+    await page.getByRole('button', { name: 'Add to prediction' }).click();
     assert.equal(await page.locator('.mbgc-scenario').count(), 1);
-    await page.getByRole('button', { name: 'Restore actual grades' }).click();
+    await page.getByRole('button', { name: 'Clear predictions' }).click();
     assert.equal(await result.textContent(), '72.31%');
     await page.getByLabel('Target type').selectOption('letter');
     await page.getByLabel('Letter grade', { exact: true }).selectOption('E');
@@ -147,7 +154,8 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     });
     await page.getByLabel('Academic term').selectOption('term:71');
     await page.getByRole('button', { name: 'Refresh now' }).click();
-    await waitText('.mbgc-feedback', 'Checked');
+    await page.getByText('Sync details', { exact: true }).click();
+    await page.locator('.mbgc-diagnostics').getByText(/Checked \d+ student pages/).waitFor();
     const physicsRow = page.locator('.mbgc-subject', { hasText: 'Physics' });
     assert.equal(await physicsRow.locator('.mbgc-numeral').textContent(), '76.92%');
 
@@ -219,10 +227,13 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     assert.equal(widths.headerMax, 'none');
     await page.getByText('54.00%', { exact: true }).waitFor();
     const subject = page.locator('.mbgc-subject').filter({ hasText: '54.00%' });
-    await subject.getByText('Task list unverified', { exact: true }).waitFor();
+    const info = subject.getByRole('button', { name: 'About this grade' });
+    await info.focus();
+    await subject.getByRole('tooltip').getByText(/Some assignments may not have been included/).waitFor();
+    await info.press('Escape');
     await subject.locator('summary').click();
     await subject.getByText(/could not confirm that the task list includes every assessment/).waitFor();
-    await page.getByText('Sync diagnostics', { exact: true }).click();
+    await page.getByText('Sync details', { exact: true }).click();
     const { version } = JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8'));
     await page.getByText('Extension version ' + version, { exact: true }).waitFor();
     await page.getByText(/3 assessments read of 3 candidates · 2 with usable points/).waitFor();
@@ -295,15 +306,15 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     await evaluateExtension('chrome.runtime.sendMessage = globalThis.originalSend');
     await page.getByRole('link', { name: 'Overall Grades' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
-    await page.getByText('Sync diagnostics', { exact: true }).click();
+    await page.getByText('Sync details', { exact: true }).click();
     await page.getByText('Verified student grade cache', { exact: true }).waitFor();
 
     useLettersOnly = true;
     await page.goto(host + tasksPath);
     await page.locator('.mbgc-compact').getByText(/letter grades or rubric criteria alone cannot produce a percentage/i).waitFor();
     await page.getByRole('link', { name: 'Overall Grades' }).click();
+    await page.getByText('Sync details', { exact: true }).click();
     await page.getByText(/letter grades or rubric criteria alone cannot produce a percentage/i).waitFor();
-    await page.getByText('Sync diagnostics', { exact: true }).click();
     await page.getByText(/current document only · student identity/i).waitFor();
   } finally {
     await context.close();
@@ -440,6 +451,7 @@ test('automatically discovers enrolled classes, keeps PE consistent, and coalesc
     const worker = context.serviceWorkers()[0];
     await worker.evaluate(() => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:28:refresh'));
     await dashboard.getByRole('button', { name: 'Refresh now' }).click();
+    await dashboard.getByText('Sync details', { exact: true }).click();
     await dashboard.getByText(/\d+ unchanged/).waitFor();
     await grade('Physical Education AS', '95.00%');
     await peRow.getByText(/2 graded assessments/).waitFor();
@@ -605,6 +617,7 @@ test('render-only and linked results sync automatically and verified grades surv
     await row('Physics').locator('.mbgc-numeral', { hasText: '80.00%' }).waitFor();
     // Recent sources are reused automatically. Force a recheck to exercise a failed refresh.
     await tab.getByRole('button', { name: 'Refresh now' }).click();
+    await tab.getByText('Sync details', { exact: true }).click();
     await tab.getByText(/pages could not be verified/i).waitFor();
     await row('Mathematics').locator('summary').click();
     await row('Mathematics').getByText(/Cache · last read from rendered student page/).waitFor();
@@ -650,12 +663,101 @@ test('generic self-profile scopes automatic grades and blocks a mid-refresh acco
     await worker.evaluate(async (key) => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:' + key + ':refresh'), account);
     switchDuringRead = true;
     await tab.getByRole('button', { name: 'Refresh now' }).click();
+    await tab.getByText(/couldn’t finish updating grades/i).waitFor();
+    await tab.getByText('Sync details', { exact: true }).click();
     await tab.getByText(/signed-in profile could not be reverified/i).waitFor();
     const cachedPoints = await worker.evaluate(async (key) =>
       (await loadAccount(key)).cache.classes['123'].terms['term:71'].records['1'].earnedPoints, account);
     assert.equal(cachedPoints, 8);
     assert.equal(await tab.getByText('74.50%', { exact: true }).count(), 0);
   } finally {
+    await browser.close();
+    await fs.rm(userData, { recursive: true, force: true });
+  }
+});
+
+test('cold sync shows real milestones and Retry while warm sync retains grades and sidebar badges', { timeout: 22000 }, async () => {
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-ux-sync-'));
+  const browser = await chromium.launchPersistentContext(userData, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root], viewport: { width: 950, height: 780 }
+  });
+  let resumeRoster, resumeClass, resumeWarm;
+  const rosterGate = new Promise((resolve) => { resumeRoster = resolve; });
+  const classGate = new Promise((resolve) => { resumeClass = resolve; });
+  const warmGate = new Promise((resolve) => { resumeWarm = resolve; });
+  try {
+    const className = 'Further Mathematics and Advanced Problem Solving';
+    const shell = (body, link = '') => `<meta name="current-student-id" content="28">
+      <aside class="sidebar" style="width:130px"><nav><a href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a>
+        <a href="/student/classes">My Classes</a>${link}</nav></aside><main>${body}</main>`;
+    const classLink = `<a href="/student/classes/123">${className}</a>`;
+    const tasks = shell(`<h1 class="class-title">${className}</h1><section data-all-tasks><h2>All Tasks</h2>
+      <select name="term_id"><option value="12">Semester 1</option></select><h3>Assessment</h3>
+      <div data-task-list="all" data-term-id="12" data-total-count="2">
+        <div class="task-card" data-category="Coursework"><a href="${tasksPath}/1">Extended project</a><span class="points">90 / 100</span></div>
+        <div class="task-card" data-category="Coursework"><a href="${tasksPath}/2">Quiz</a><span class="points">1 / 10</span></div>
+      </div><table id="categories-table"><tr><td>Coursework</td><td>100</td></tr></table></section>`);
+    let failClass = true;
+    let holdWarmClass = false;
+    await browser.route(host + '/**', async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/student/classes') {
+        await rosterGate;
+        return route.fulfill({ contentType: 'text/html', body: shell(classLink) });
+      }
+      if (pathname === tasksPath) {
+        await classGate;
+        if (holdWarmClass) await warmGate;
+        if (failClass) return route.fulfill({ status: 503, body: 'Busy' });
+        return route.fulfill({ contentType: 'text/html', body: tasks });
+      }
+      return route.fulfill({ contentType: 'text/html', body: shell('<h1>Workspace</h1>') });
+    });
+    browser.setDefaultTimeout(7000);
+    const tab = await browser.newPage();
+    await tab.goto(host + '/student/dashboard');
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    await tab.getByText('Finding your classes…', { exact: true }).waitFor();
+    const progress = tab.getByRole('progressbar', { name: 'Grade synchronization' });
+    assert.equal(await progress.getAttribute('aria-valuenow'), null);
+    await tab.emulateMedia({ reducedMotion: 'reduce' });
+    assert.equal(await tab.locator('.mbgc-loading-ring').evaluate((node) => getComputedStyle(node, '::after').animationName), 'none');
+    resumeRoster();
+    await tab.getByText('Collecting assessments for 1 class found so far…', { exact: true }).waitFor();
+    resumeClass();
+    await tab.getByRole('button', { name: 'Retry', exact: true }).waitFor();
+    assert.equal(await tab.locator('.mbgc-loading').count(), 0);
+    failClass = false;
+    await browser.serviceWorkers()[0].evaluate(() => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:28:refresh'));
+    await tab.getByRole('button', { name: 'Retry', exact: true }).click();
+    await tab.getByText('50.00%', { exact: true }).waitFor();
+    await tab.getByRole('button', { name: 'Refresh now' }).waitFor();
+    await tab.getByRole('button', { name: 'Back to ManageBac' }).click();
+    await tab.reload();
+    await tab.evaluate((html) => document.querySelector('.sidebar nav').insertAdjacentHTML('beforeend', html), classLink);
+    const badge = tab.locator('.sidebar a[href="/student/classes/123"] > .mbgc-sidebar-grade');
+    await tab.getByRole('img', { name: 'Calculated grade D' }).waitFor();
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    await tab.getByText('50.00%', { exact: true }).waitFor();
+    assert.equal(await tab.locator('.mbgc-loading').count(), 0);
+    await tab.getByLabel('Calculation method').selectOption('points');
+    await tab.getByRole('img', { name: 'Calculated grade A' }).waitFor();
+    await tab.getByText('82.73%', { exact: true }).waitFor();
+    assert.equal(await badge.count(), 1);
+    assert.equal(await badge.evaluate((node) => node.parentElement.scrollWidth <= node.closest('.sidebar').clientWidth), true);
+    holdWarmClass = true;
+    await browser.serviceWorkers()[0].evaluate(() => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:28:refresh'));
+    await tab.getByRole('button', { name: 'Refresh now' }).click();
+    await tab.getByText('Updating grades…', { exact: true }).waitFor();
+    assert.equal(await tab.getByText('82.73%', { exact: true }).isVisible(), true);
+    assert.equal(await tab.locator('.mbgc-loading').count(), 0);
+    resumeWarm();
+    await tab.getByRole('button', { name: 'Refresh now' }).waitFor();
+  } finally {
+    resumeRoster();
+    resumeClass();
+    resumeWarm();
     await browser.close();
     await fs.rm(userData, { recursive: true, force: true });
   }
