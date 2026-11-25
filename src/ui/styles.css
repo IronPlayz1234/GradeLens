@@ -40,7 +40,15 @@
 .mbgc-owned svg, .mbgc-nav svg { display: inline-block; width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .mbgc-owned .mbgc-muted { color: var(--mbgc-muted); font-size: 13px; overflow-wrap: anywhere; }
 .mbgc-native-view { font-size: 0 !important; line-height: 0 !important; }
-.mbgc-native-view > :not(.mbgc-stage) { display: none !important; }
+.mbgc-native-view > :not(#mbgc-stage-host) { display: none !important; }
+#mbgc-stage-host {
+  display: block; position: relative; box-sizing: border-box; min-width: 0; max-width: none;
+  width: 100%; grid-column: 1 / -1; flex: 1 1 100%; align-self: stretch;
+}
+#mbgc-stage-host.mbgc-stage-fixed {
+  position: fixed; inset: 0 0 0 var(--mbgc-content-start, 0px); width: auto; margin: 0;
+  z-index: 1000; overflow: auto; overscroll-behavior: contain; background: var(--mbgc-base);
+}
 .mbgc-stage { display: block; min-width: 0; width: 100%; }
 .mbgc-page { max-width: 1120px; margin: 0 auto; padding: clamp(14px, 3vw, 40px); container-type: inline-size; }
 .mbgc-nav { display: flex !important; align-items: center; gap: 9px; }

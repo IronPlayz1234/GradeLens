@@ -93,3 +93,56 @@ test('late partial responses cannot restore a task after a newer authoritative d
   app.mergeScan(cache, { ...initial, at: 20, complete: false });
   assert.equal(cache.classes['123'].terms['term:71'].records['1'], undefined);
 });
+
+test('reads the screenshot-inspired task panel, dropdown link ID, score variants, and weight column', () => {
+  const doc = fixture('desktop-integration');
+  const snapshot = app.scan(doc, tasksURL);
+  assert.deepEqual(snapshot.term, { id: '671', label: 'Semester 1 (current)' });
+  assert.equal(app.account(doc, tasksURL), '9');
+  assert.equal(app.taskSurface(doc).chart.textContent, 'Assessment');
+  assert.deepEqual(snapshot.weights, { Coursework: 60, Research: 40 });
+  assert.deepEqual(snapshot.records.map((item) => [item.id, item.termId, item.earnedPoints, item.maxPoints]),
+    [['301', '671', 18, 20], ['303', '671', null, null], ['302', '671', 0, 10]]);
+  assert.equal(snapshot.diagnostic.points, 2);
+  assert.equal(snapshot.complete, false);
+});
+
+test('visible semester label alone cannot establish a term ID', () => {
+  const doc = fixture('desktop-integration');
+  doc.querySelector('#school-terms').remove();
+  doc.querySelector('#term-results').removeAttribute('data-term-id');
+  const snapshot = app.scan(doc, tasksURL);
+  assert.equal(snapshot.term.id, null);
+  assert.equal(snapshot.diagnostic.unassigned, 2);
+  assert.ok(snapshot.records.every((item) => item.termId === null));
+});
+
+test('reads bracketed native selects and link-backed native option values', () => {
+  const doc = fixture('desktop-integration');
+  const select = '<select name="filters[academic_term_id]"><option value="671" selected>Semester 1 (current)</option></select>';
+  doc.querySelector('.titlebar').innerHTML = '<div class="title">All Tasks</div>' + select;
+  assert.deepEqual(app.scan(doc, tasksURL).term, { id: '671', label: 'Semester 1 (current)' });
+  doc.querySelector('option').setAttribute('value', '/student/classes/123/core_tasks?class_term_id=672');
+  assert.equal(app.scan(doc, tasksURL).term.id, '672');
+});
+
+test('distinguishes displayed letters without point values from pending tasks', () => {
+  const doc = fixture('desktop-integration');
+  doc.querySelector('.score-points').remove();
+  doc.querySelector('[data-earned-points]').remove();
+  const { diagnostic } = app.scan(doc, tasksURL);
+  assert.equal(diagnostic.parsed, 3);
+  assert.equal(diagnostic.points, 0);
+  assert.equal(diagnostic.scoreIssues, 2);
+});
+
+test('reads a portaled native term menu and retains verified evidence when that control closes', () => {
+  const doc = fixture('desktop-integration');
+  const menu = doc.querySelector('#school-terms');
+  doc.body.append(menu);
+  assert.equal(app.scan(doc, tasksURL).term.id, '671');
+  menu.remove();
+  assert.equal(app.scan(doc, tasksURL).term.id, '671');
+  doc.querySelector('[role="combobox"]').textContent = 'Semester 2';
+  assert.equal(app.scan(doc, tasksURL).term.id, null);
+});

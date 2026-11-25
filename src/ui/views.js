@@ -44,7 +44,67 @@
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
   }) : 'Never synced';
   const terms = (sync) => new Map(Object.values(sync.cache.classes).flatMap((subject) => Object.entries(subject.terms))
-    .sort(([, a], [, b]) => (a.lastScan ?? 0) - (b.lastScan ?? 0)).map(([id, bucket]) => [id, bucket.label]));
+    .sort(([, a], [, b]) => (a.lastScan ?? 0) - (b.lastScan ?? 0) ||
+      Number(a.label !== 'Selected academic term') - Number(b.label !== 'Selected academic term'))
+    .map(([id, bucket]) => [id, bucket.label]));
+
+  function chooseTerm(sync, view, options) {
+    const fromClass = sync.context?.context.type === 'tasks' && sync.context.term.id
+      ? 'term:' + sync.context.term.id : null;
+    if (fromClass && view.nativeTerm !== fromClass && options.some(([id]) => id === fromClass)) {
+      view.nativeTerm = fromClass;
+      view.term = fromClass;
+      view.scenario = null;
+    }
+    if (options.some(([id]) => id === view.term)) return;
+    const selected = Object.values(sync.cache.classes).map((item) => item.selectedTerm)
+      .filter(Boolean).sort((a, b) => b.at - a.at)[0];
+    const preferred = selected ? 'term:' + selected.id : null;
+    view.term = options.some(([id]) => id === preferred) ? preferred :
+      [...options].reverse().find(([id]) => id !== 'unknown')?.[0] ?? options[0]?.[0];
+  }
+
+  function syncStatus(sync) {
+    const scan = sync.diagnostics;
+    if (sync.storageState === 'unavailable') return 'Session cache unavailable. Grades found on this page are temporary. Reload the extension and this tab, then refresh.';
+    if (!scan) return 'Checking the current page…';
+    if (scan.failed) return 'Page extraction failed. Reload Class Tasks and use Refresh now.';
+    if (scan.loading) return 'The selected term is still loading. Wait for the native task list or refresh it.';
+    if (!['tasks', 'workspace'].includes(scan.page)) return sync.cache.lastSync ? '' :
+      'Open a class’s Tasks tab to collect its term, assessment points, and weights.';
+    if (!scan.parsed) return scan.candidates
+      ? 'Task elements were found, but their stable assessment links could not be read. Check Sync diagnostics.'
+      : 'No assessment rows detected on this page. Load the native task list or open Tasks & Deadlines → Past.';
+    if (scan.page === 'tasks' && !scan.term) return 'The selected class term has no recognized identifier. Switch terms in the native selector and check Sync diagnostics.';
+    if (!scan.points) return scan.scoreIssues
+      ? 'Grades are displayed, but no usable earned and maximum points were detected. Letter grades alone cannot produce a percentage.'
+      : 'Assessments were read. No graded points are available yet.';
+    if (scan.unassigned) return 'Some scored tasks have no verified term and were excluded. Open the corresponding Class Tasks page.';
+    if (scan.page === 'tasks' && !scan.weights) return 'Scored tasks were read. Open ManageBac’s category weights panel or enter verified weights in Overall Grades → Settings.';
+    return '';
+  }
+
+  function syncDiagnostics(sync, view) {
+    const report = sync.diagnostics;
+    const details = h('details', 'mbgc-overrides mbgc-diagnostics');
+    details.open = Boolean(view.diagnosticsOpen);
+    details.addEventListener('toggle', () => { view.diagnosticsOpen = details.open; });
+    details.append(h('summary', '', 'Sync diagnostics'));
+    const storage = sync.storageState === 'session' ? 'Verified student session cache' :
+      sync.storageState === 'unavailable' ? 'Session cache unavailable · current document only' :
+        'Current document only · student identity could not be verified';
+    details.append(h('p', 'mbgc-muted', storage));
+    if (report && !report.failed && ['tasks', 'workspace'].includes(report.page)) {
+      details.append(h('p', 'mbgc-muted',
+        `${report.parsed} assessments read of ${report.candidates} candidates · ${report.points} with usable points · ${report.scoreIssues} with missing or invalid points · ${report.weights} category weights`),
+      h('p', 'mbgc-muted', report.term ? 'Selected term identifier recognized.' : 'Selected term identifier unavailable.',
+        report.page === 'tasks' ? (report.chart ? ' Native chart recognized.' : ' Native chart anchor unavailable.') : '',
+        report.complete ? ' Complete list verified.' : ' List completeness unverified.'));
+    }
+    if (!sync.account) details.append(h('p', 'mbgc-muted',
+      'Open Overall Grades or Grade Estimator from the sidebar while still on the Class Tasks page to use the current document’s data.'));
+    return details;
+  }
 
   function gradeData(sync, classId, termKey) {
     const entry = sync.cache.classes[classId];
@@ -60,7 +120,8 @@
     const provisional = !bucket?.complete || result.flagged > 0 || stale || Boolean(sync.overrides.weights[classId]);
     const missing = !verified ? 'Term unavailable. Confirm the academic term in Class Tasks.' :
       result.missing.length ? `Weights needed for ${result.missing.join(', ')}.` :
-        !result.count ? 'Waiting for graded assessments in this term.' :
+        !result.count ? (result.flagged ? 'Assessment points are missing or invalid.' :
+          tasks.length ? 'No graded assessments in this term.' : 'No assessment rows synced for this term.') :
           result.percentage === null ? 'No graded assessments have a positive category weight.' : '';
     return { classId, title: entry?.name || `Class ${classId}`, bucket, tasks, verified, weights, scale, scaleLabel,
       result, stale, provisional, missing, termKey, label: bucket?.label || 'Unidentified term' };
@@ -148,7 +209,9 @@
         h('span', 'mbgc-chip', labelStatus(data))),
       h('p', 'mbgc-compact-note mbgc-muted',
         changed ? 'Grade updated · ' : '', data.missing ? data.missing + ' ' : '',
-        data.bucket?.lastScan ? `Synced ${time(data.bucket.lastScan)}` : 'Waiting for a successful sync.'));
+        data.bucket?.lastScan ? `Synced ${time(data.bucket.lastScan)}` : '',
+        (type === 'tasks' || sync.storageState === 'unavailable') && syncStatus(sync)
+          ? ' ' + syncStatus(sync) : ''));
     item.setAttribute('aria-label', name);
     return item;
   }
@@ -276,8 +339,9 @@
       (id) => sync.setSettings({ method: id }));
     const refresh = button(sync.refreshing ? 'Refreshing…' : 'Refresh now', () => sync.refresh(true), 'refresh');
     refresh.disabled = sync.refreshing;
-    const syncText = h('div', 'mbgc-sync-text', icon('clock'), sync.cache.lastSync ? `Last synced ${time(sync.cache.lastSync)}` : 'Waiting to sync');
-    const state = h('p', 'mbgc-feedback', sync.message);
+    const syncText = h('div', 'mbgc-sync-text', icon('clock'), sync.cache.lastSync ? `Last read ${time(sync.cache.lastSync)}` :
+      sync.refreshing ? 'Checking pages' : 'No assessment data synced');
+    const state = h('p', 'mbgc-feedback', [sync.message, syncStatus(sync)].filter(Boolean).join(' '));
     state.setAttribute('role', 'status');
     return h('header', 'mbgc-header',
       h('div', 'mbgc-header-line',
@@ -289,15 +353,13 @@
       h('div', 'mbgc-toolbar',
         field('Academic term', termChoice),
         field('Calculation method', method),
-        syncText), state);
+        syncText), state, syncDiagnostics(sync, view));
   }
 
   function dashboard(sync, view, handlers) {
     const termOptions = [...terms(sync)];
     const classes = Object.entries(sync.cache.classes).sort(([, a], [, b]) => (a.name || '').localeCompare(b.name || ''));
-    if (!termOptions.some(([id]) => id === view.term)) {
-      view.term = [...termOptions].reverse().find(([id]) => id !== 'unknown')?.[0] ?? termOptions[0]?.[0];
-    }
+    chooseTerm(sync, view, termOptions);
     const subjects = classes.filter(([, entry]) => entry.terms[view.term] ||
       (view.term !== 'unknown' && !Object.keys(entry.terms).some((id) => id !== 'unknown')));
     const content = h('div', 'mbgc-page', header(sync, 'grades', view, handlers, termOptions),
@@ -317,9 +379,7 @@
 
   function estimator(sync, view, handlers) {
     const termOptions = [...terms(sync)];
-    if (!termOptions.some(([id]) => id === view.term)) {
-      view.term = [...termOptions].reverse().find(([id]) => id !== 'unknown')?.[0] ?? termOptions[0]?.[0];
-    }
+    chooseTerm(sync, view, termOptions);
     const subjects = Object.entries(sync.cache.classes).filter(([, item]) => item.terms[view.term])
       .map(([id, item]) => [id, item.name || 'Class ' + id]).sort(([, a], [, b]) => a.localeCompare(b));
     const page = h('div', 'mbgc-page', header(sync, 'estimator', view, handlers, termOptions));

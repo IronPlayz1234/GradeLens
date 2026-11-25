@@ -24,9 +24,15 @@ The project folder is the unpacked extension. It runs without a build, npm insta
 
 ## Synchronization and privacy
 
-The extension observes assessment changes in the open student page and scans when navigating or changing terms. When it can verify a student account from the visible profile menu, it also checks discovered class Tasks pages and link-backed Tasks & Deadlines pages with bounded, same-origin HTML requests. It picks up grades and grade edits exposed in those responses without opening individual assessment pages. The refresh interval defaults to five minutes and can be turned off in **Settings**. Automatic checks pause when ManageBac is hidden. **Last synced** is when the extension last successfully read assessment or configuration data, and each subject shows its own scan time.
+The extension observes assessment changes in the open student page and scans when navigating or changing terms. When it can verify a student account from an explicit student identity marker in the document or the visible profile menu, it also checks discovered class Tasks pages and link-backed Tasks & Deadlines pages with bounded, same-origin HTML requests. It picks up grades and grade edits exposed in those responses without opening individual assessment pages. The refresh interval defaults to five minutes and can be turned off in **Settings**. Automatic checks pause when ManageBac is hidden. **Last read** is when the extension last successfully read assessment or configuration data, and each subject shows its own scan time.
 
 Student grade records are stored in extension session storage under the school and verified student account. They clear when the browser session ends or the extension reloads. Preferences and optional account-scoped manual settings persist locally. When the account cannot be verified, extracted grades and overrides stay in the current document and refresh scans that document only. If the signed-in identity changes without a page reload, syncing pauses until you reload ManageBac. **Clear cached grades** removes the current account’s cached grades and manual overrides. The extension has no telemetry and makes no requests to non-ManageBac origins.
+
+## Troubleshoot sync
+
+Open the affected class’s **Tasks** tab and wait for **All Tasks** to render. Open **Overall Grades** or **Grade Estimator** from that tab, click **Refresh now**, then expand **Sync diagnostics**. It shows counts for candidate rows, recognized assessment links, usable point scores, missing or invalid scores, and category weights. It also shows whether the selected term, native chart, and session cache were recognized. The diagnostic summary contains no names, assessment titles, scores, URLs, or account identifiers.
+
+A visible semester label alone cannot identify a term. The extension looks for an ID in the selected option, the selected menu item’s metadata or native link, or the class Tasks URL. A letter-only chart likewise does not provide earned and maximum points. If the session cache fails, the extension keeps the grades it can read in the current document and retries on refresh.
 
 ## Coverage and live verification
 
@@ -53,3 +59,5 @@ npm test
 npx playwright install chromium
 npm run test:browser
 ```
+
+The browser suite defaults to Playwright’s Chrome for Testing build. For a secondary Opera GX check on macOS, launch the same fixtures with a temporary profile using `MBGC_BROWSER_PATH='/Applications/Opera GX.app/Contents/MacOS/Opera' npm run test:browser`.

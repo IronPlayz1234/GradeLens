@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="current-student-id" content="9">
+  <title>Class Tasks</title>
+  <style>
+    body { margin: 0; background: #eff1f4; color: #172032; font: 15px system-ui; }
+    .app { display: grid; grid-template-columns: 204px minmax(0, 1fr); min-height: 100vh; }
+    aside { padding: 18px; border-right: 1px solid #d9dfe3; background: white; }
+    aside a { display: block; padding: 8px 0; }
+    .workspace { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; }
+    #content { grid-column: 1; min-width: 0; }
+    #course { grid-column: 2; padding: 24px; min-width: 0; }
+    .titlebar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .class-panel { padding: 20px; background: white; border: 1px solid #dee1e7; border-radius: 10px; }
+    .chart-frame { margin-top: 12px; padding: 12px; border: 1px solid #dee1e7; }
+    .workspace header { display: grid !important; max-width: 72px !important; }
+    .workspace button { max-width: 36px; }
+    @media (max-width: 600px) { .app { display: block; } .workspace { grid-template-columns: 36px minmax(0, 1fr); } }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar"><nav><a href="/student/tasks_and_deadlines">Tasks &amp; Deadlines</a><a href="/student/classes/123">Chemistry</a></nav></aside>
+  <div class="workspace">
+    <div id="content" aria-label="Utility column">Tools</div>
+    <div id="course">
+      <h1 class="class-title">Chemistry</h1>
+      <a href="/student/classes/123">Overview</a>
+      <a href="/student/classes/123/core_tasks" aria-current="page">Tasks</a>
+      <div class="class-panel">
+        <div class="titlebar"><div class="title">All Tasks</div>
+          <div>
+            <button type="button" role="combobox" aria-label="Academic period" aria-controls="school-terms" aria-expanded="false"><span>Semester 1 (current)</span></button>
+            <ul id="school-terms" role="listbox" hidden>
+              <li><a role="option" aria-selected="true" href="/student/classes/123/core_tasks?class_term_id=671">Semester 1 (current)</a></li>
+              <li><a role="option" aria-selected="false" href="/student/classes/123/core_tasks?class_term_id=672">Semester 2</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="chart-frame">
+          <div class="titlebar"><div class="title">Assessment</div><button type="button" id="change-chart" aria-label="Switch chart">↻</button></div>
+          <canvas aria-label="Native chart"></canvas>
+        </div>
+        <div id="term-results" data-task-list="all" data-term-id="671">
+          <article class="short-assignment"><a class="task-name" href="/student/classes/123/core_tasks/301">Unit test</a>
+            <span class="task-category">Coursework</span><div class="task-score"><span class="grade">A</span><span class="score-points">18 out of 20 points</span></div>
+          </article>
+          <article class="task-row"><a href="/student/classes/123/core_tasks/302">Lab work</a>
+            <span class="task-category">Research</span><div class="assessment-score"><span class="grade">U</span><span data-earned-points="0" data-max-points="10"></span></div>
+          </article>
+          <article class="short-assignment"><a href="/student/classes/123/core_tasks/303">Future project</a>
+            <span class="task-category">Research</span><div class="task-score"><span class="submission-status">Pending</span></div>
+          </article>
+        </div>
+      </div>
+      <table><thead><tr><th>Category</th><th>Average</th><th>Weight (%)</th></tr></thead>
+        <tbody><tr><td>Coursework</td><td>90%</td><td>60%</td></tr><tr><td>Research</td><td>0%</td><td>40%</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</body>
+</html>

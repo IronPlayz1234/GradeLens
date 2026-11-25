@@ -11,7 +11,7 @@ async function notify(account, originTab) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  if (sender.origin !== origin || sender.frameId !== 0 || !/^https:\/\/uia\.managebac\.com\/student(?:[/?#]|$)/.test(sender.url ?? '') ||
+  if (sender.id !== chrome.runtime.id || (sender.origin != null && sender.origin !== origin) || sender.frameId !== 0 || !/^https:\/\/uia\.managebac\.com\/student(?:[/?#]|$)/.test(sender.url ?? '') ||
     typeof message !== 'object' || !message?.type?.startsWith('mbgc:')) return;
   const work = pending.then(async () => {
     const account = /^\d+$/.test(message.account ?? '') ? message.account : null;

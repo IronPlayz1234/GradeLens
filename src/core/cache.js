@@ -16,13 +16,13 @@
       const bucket = subject.terms[termId ? 'term:' + termId : 'unknown'] ??= {
         label, termId, records: {}, weights: {}, scale: null, lastScan: null, complete: false, weightScan: 0
       };
-      if (label && (bucket.label.startsWith('Term ') || !bucket.label)) bucket.label = label;
+      if (label && (bucket.label.startsWith('Term ') || bucket.label === 'Selected academic term' || !bucket.label)) bucket.label = label;
       return bucket;
     };
     if (context.classId && ['tasks', 'overview', 'task'].includes(context.type)) {
       const bucket = ensureTerm(context.classId, term.id, term.label);
-      if (context.type === 'tasks' && readable) {
-        terms.set(bucket, new Set());
+      if (context.type === 'tasks') {
+        if (readable) terms.set(bucket, new Set());
         const subject = cache.classes[context.classId];
         const field = snapshot.visible ? 'selectedTerm' : snapshot.defaultTerm ? 'defaultTerm' : null;
         if (field && term.id && at >= (subject[field]?.at ?? 0)) subject[field] = { id: term.id, at };

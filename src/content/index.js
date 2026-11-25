@@ -2,6 +2,19 @@
   const app = globalThis.MBGC;
   const views = { '#mbgc-overall-grades': 'grades', '#mbgc-grade-estimator': 'estimator' };
   const stage = app.h('div', 'mbgc-owned mbgc-stage');
+  const stageHost = app.h('div', 'mbgc-owned');
+  stageHost.id = 'mbgc-stage-host';
+  stageHost.append(stage);
+
+  async function isolateDashboard() {
+    const response = await fetch(chrome.runtime.getURL('src/ui/styles.css'));
+    if (!response.ok) return;
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(await response.text());
+    const shadow = stageHost.attachShadow({ mode: 'open' });
+    shadow.adoptedStyleSheets = [sheet];
+    shadow.append(stage);
+  }
   const card = app.h('div', 'mbgc-owned mbgc-card-host');
   let nav = [];
   let fallback;
@@ -10,6 +23,7 @@
   let theme;
   let themeKey = '';
   let cardKey = '';
+  let cardSection;
   let viewKey = '';
   let lastURL = location.href;
   let lastAccount;
@@ -26,9 +40,48 @@
     return { expanded: new Set(), changed: new Map(), nextId: 0 };
   }
 
+  const mainSelector = 'main,[role="main"],#main-content,#content,.main-content';
+  function mainCandidates() {
+    return [...document.querySelectorAll(mainSelector)].filter((node) =>
+      !node.closest('nav,aside,.sidebar,[role="navigation"]') && (!nativeAnchor || !node.contains(nativeAnchor)));
+  }
+
   function knownMain() {
-    const candidates = [...document.querySelectorAll('main, [role="main"], #main-content, #content, .main-content')];
-    return candidates.find((node) => !node.closest('nav, aside') && (!nativeAnchor || !node.contains(nativeAnchor))) ?? null;
+    return mainCandidates()[0] ?? null;
+  }
+
+  function dashboardBounds() {
+    const viewport = document.documentElement.clientWidth;
+    const sidebar = nativeAnchor?.closest('aside,.sidebar') ?? nativeAnchor?.closest('[role="navigation"],nav');
+    const rect = sidebar?.getBoundingClientRect();
+    const side = rect && rect.left < viewport * .15 && rect.right < viewport * .45 && rect.height > rect.width
+      ? Math.max(0, rect.right) : 0;
+    const content = mainCandidates().find((node) => {
+      const box = node.getBoundingClientRect();
+      return box.width >= (viewport - side) * .70 && box.left >= side - 16 && box.right <= viewport + 4 &&
+        getComputedStyle(node).display !== 'contents';
+    });
+    return { content, side };
+  }
+
+  function mountDashboard() {
+    const { content, side } = dashboardBounds();
+    if (nativeHost && nativeHost !== content) nativeHost.classList.remove('mbgc-native-view');
+    nativeHost = content;
+    stageHost.classList.toggle('mbgc-stage-fixed', !content);
+    if (stageHost.style.getPropertyValue('--mbgc-content-start') !== side + 'px') {
+      stageHost.style.setProperty('--mbgc-content-start', side + 'px');
+    }
+    if (content) {
+      if (stageHost.parentNode !== content) content.prepend(stageHost);
+      content.classList.add('mbgc-native-view');
+    } else if (stageHost.parentNode !== document.body) document.body.append(stageHost);
+  }
+
+  function unmountDashboard() {
+    nativeHost?.classList.remove('mbgc-native-view');
+    nativeHost = null;
+    stageHost.remove();
   }
 
   function getWorkspaceAnchor() {
@@ -91,33 +144,24 @@
     themeKey = '';
   }
 
-  function nativeHeading(pattern, root = document) {
-    const selectors = 'h1,h2,h3,h4,h5,[role="heading"],.h2,.h3,.h4,.section-title,.panel-title,.card-title';
-    const candidates = [...root.querySelectorAll(selectors)].filter((node) =>
-      !node.closest('.mbgc-owned,[hidden],[aria-hidden="true"]') && pattern.test(app.clean(node.textContent)));
-    return candidates.find((node) => !candidates.some((other) => other !== node && node.contains(other))) ?? null;
-  }
-
   function placeCard(type) {
-    const main = knownMain() ?? document;
     if (type === 'tasks') {
-      const heading = nativeHeading(/^all tasks$/i, main);
-      if (!heading) return false;
-      const titleBar = heading.closest('.section-header,.panel-heading,.card-header,.box-header,.section-heading') ?? heading;
-      const section = heading.closest('[data-all-tasks], #all-tasks, #all_tasks, .section, .panel, .card, section, article');
-      const chart = section && nativeHeading(/^(overall task completion|grade distribution|assessment)$/i, section);
-      // Anchor to the section heading outside the chart subtree so chart switches retain the card.
-      if (section && titleBar.parentElement === section && titleBar.nextElementSibling !== card) titleBar.after(card);
-      else if (section && section !== titleBar && section.contains(titleBar)) {
-        let branch = titleBar;
-        while (branch.parentElement !== section && branch.parentElement) branch = branch.parentElement;
-        if (chart && branch.contains(chart)) {
-          if (titleBar.nextElementSibling !== card) titleBar.after(card);
-        } else if (branch.nextElementSibling !== card) branch.after(card);
-      } else if (titleBar.nextElementSibling !== card) titleBar.after(card);
+      const { title, section, chart } = app.taskSurface(document);
+      if (!title || !section) return false;
+      if (!chart) return card.isConnected && (section.contains(card) ||
+        Boolean(cardSection?.contains(title) && cardSection.contains(card)));
+      cardSection = section;
+      let chartPanel = chart;
+      while (chartPanel.parentElement !== section) {
+        const parent = chartPanel.parentElement;
+        if (!parent || parent.contains(title) || parent.querySelector('select,[role="combobox"],[data-selected-term-id]')) break;
+        chartPanel = parent;
+      }
+      if (chartPanel.previousElementSibling !== card) chartPanel.before(card);
       return card.isConnected;
     }
-    const heading = nativeHeading(/^latest activity$/i, main);
+    const main = knownMain() ?? document;
+    const heading = app.heading(document, /^latest activity$/i);
     if (heading) {
       const section = heading.closest('section,article,.section,.panel,.card') ?? heading;
       if (section.previousElementSibling !== card) section.before(card);
@@ -167,7 +211,7 @@
   }
 
   function focusReplacement(before, after) {
-    const focused = document.activeElement;
+    const focused = stageHost.shadowRoot?.activeElement ?? document.activeElement;
     const focusable = 'button, select, input, textarea, summary, a[href]';
     if (!before.contains(focused)) return;
     const visible = (node) => !node.closest('details:not([open])') || node.matches('summary');
@@ -182,8 +226,7 @@
 
   function render(force = false) {
     if (!app.studentPath(location.pathname)) {
-      nativeHost?.classList.remove('mbgc-native-view');
-      stage.remove();
+      unmountDashboard();
       card.remove();
       for (const item of nav) (item.closest('.mbgc-nav-shell') ?? item).remove();
       return;
@@ -201,7 +244,7 @@
     if (nextThemeKey !== themeKey) {
       theme = nextTheme;
       themeKey = nextThemeKey;
-      for (const node of [stage, card, ...nav]) app.applyTheme(node, theme);
+      for (const node of [stage, stageHost, card, ...nav]) app.applyTheme(node, theme);
     }
     updateChanges();
     const panel = views[location.hash];
@@ -213,17 +256,10 @@
     const current = app.route(new URL(location.href));
     if (panel) {
       card.remove();
-      const main = knownMain();
-      const nextHost = main && (!nativeAnchor || !main.contains(nativeAnchor)) ? main : null;
-      if (nativeHost !== nextHost) nativeHost?.classList.remove('mbgc-native-view');
-      nativeHost = nextHost;
-      if (nativeHost) {
-        if (stage.parentNode !== nativeHost) nativeHost.prepend(stage);
-        nativeHost.classList.add('mbgc-native-view');
-      } else if (stage.parentNode !== document.body) document.body.prepend(stage);
-      const contentKey = JSON.stringify([panel, sync.settings, sync.cache, sync.overrides, sync.refreshing, sync.message, [...changed]]);
+      mountDashboard();
+      const contentKey = JSON.stringify([panel, sync.settings, sync.cache, sync.overrides, sync.refreshing, sync.message, sync.diagnostics, sync.storageState, sync.account, [...changed]]);
       if (force || viewKey !== contentKey) {
-        const editor = document.activeElement;
+        const editor = stageHost.shadowRoot?.activeElement ?? document.activeElement;
         if (!force && editor?.matches('textarea') && stage.contains(editor)) return;
         const handlers = { close: closeView, render: () => render(true) };
         const content = panel === 'grades' ? app.dashboard(sync, view, handlers) : app.estimator(sync, view, handlers);
@@ -243,9 +279,7 @@
       }
       wasViewing = true;
     } else {
-      nativeHost?.classList.remove('mbgc-native-view');
-      nativeHost = null;
-      if (stage.isConnected) stage.remove();
+      unmountDashboard();
       viewKey = '';
       wasViewing = false;
       if (!current.classId || !['tasks', 'overview'].includes(current.type)) {
@@ -257,7 +291,7 @@
         ? selectClassTerm(current.classId) : 'unknown';
       const data = app.gradeData(sync, current.classId, term);
       const update = changed.has(current.classId + ':' + term);
-      const nextCardKey = JSON.stringify([data, current.type, sync.settings.method, update]);
+      const nextCardKey = JSON.stringify([data, current.type, sync.settings.method, update, sync.diagnostics, sync.storageState]);
       if (cardKey !== nextCardKey || !card.firstChild) {
         card.replaceChildren(app.compact(sync, data, current.type, update));
         cardKey = nextCardKey;
@@ -296,14 +330,15 @@
   function owns(node) {
     return (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement)?.closest('.mbgc-owned');
   }
-  const relevant = [app.selectors.tasks, app.selectors.term, app.selectors.weights, app.selectors.scale,
-    'a[href*="/student/"]', 'h1,h2,h3,h4,[role="heading"]', '[data-task-list],[data-current-student-id]'].join(',');
+  const relevant = [app.selectors.tasks, app.selectors.termControls, app.selectors.score, app.selectors.term, app.selectors.weights, app.selectors.scale,
+    'a[href*="/student/"]', 'h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4', '[data-task-list],[data-current-student-id],[role="listbox"],[role="option"]'].join(',');
   const structure = relevant + ',main,[role="main"],#content,[data-all-tasks]';
   function touchesPage(records) {
+    let surface;
     for (const entry of records) {
       if (owns(entry.target)) continue;
       if (entry.type === 'attributes' && ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'].includes(entry.attributeName) &&
-        !entry.target.closest('.short-assignment, select, [data-task-list]')) {
+        !entry.target.closest(relevant) && !entry.target.matches('li.active, li.selected, .dropdown-toggle')) {
         if (entry.target === document.body || entry.target === document.documentElement ||
           entry.target.matches('main, [role="main"], nav, aside, a[aria-current="page"]')) scheduleRender();
         continue;
@@ -311,6 +346,10 @@
       if (entry.type === 'childList' && [...entry.addedNodes, ...entry.removedNodes].every(owns)) continue;
       const target = entry.target.nodeType === Node.ELEMENT_NODE ? entry.target : entry.target.parentElement;
       if (target?.closest(relevant) && !target.matches('body')) return true;
+      const section = (surface ??= (app.route(new URL(location.href)).type === 'tasks'
+        ? app.taskSurface(document) : {})).section;
+      if (section?.contains(target) && (entry.type !== 'attributes' ||
+        ['aria-selected', 'aria-current', 'aria-expanded', 'data-selected', 'class'].includes(entry.attributeName))) return true;
       if ([...entry.addedNodes, ...entry.removedNodes].some((node) => node.nodeType === Node.ELEMENT_NODE &&
         !owns(node) && (node.matches(structure) || node.querySelector(structure)))) return true;
     }
@@ -326,24 +365,32 @@
   });
   observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
     attributeFilter: ['data-selected-term-id', 'data-term-id', 'data-total-count', 'class', 'style', 'hidden', 'aria-hidden',
-      'aria-busy', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'data-current-student-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
+      'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-current-student-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
   window.addEventListener('popstate', reconcile);
   window.addEventListener('hashchange', reconcile);
   window.navigation?.addEventListener('currententrychange', reconcile);
   document.addEventListener('change', (event) => {
-    if (event.target.matches?.(app.selectors.term) && !owns(event.target)) queueScan();
+    if (event.target.matches?.(app.selectors.termControls) && !owns(event.target)) queueScan();
   }, true);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !event.defaultPrevented && views[location.hash] && stageHost.classList.contains('mbgc-stage-fixed')) {
+      event.preventDefault();
+      closeView();
+    }
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     queueScan();
     sync.refresh();
   });
   app.scheme.addEventListener('change', scheduleRender);
+  window.addEventListener('resize', scheduleRender);
   setInterval(() => {
     if (location.href !== lastURL) reconcile();
     if (!document.hidden && app.studentPath(location.pathname)) sync.refresh();
   }, 15000);
+  void isolateDashboard().catch(() => {});
   sync.init().catch(() => {}).finally(() => {
     render();
     sync.scanVisible().then(() => sync.refresh()).catch(() => {
