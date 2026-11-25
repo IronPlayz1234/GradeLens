@@ -1,10 +1,11 @@
 (() => {
   const app = globalThis.MBGC;
   const settingsDefaults = {
-    enabled: true, appearance: 'system', method: 'percentage', subjectMethods: {},
+    enabled: true, appearance: 'system', method: 'percentage', subjectMethods: {}, compareMethods: false, academicTerm: 'current',
     showGrades: true, showEstimator: true, showBadges: true, showOverview: true, showTasks: true, refreshMinutes: 5, density: 'comfortable', progressBars: true, motion: 'full', welcomeSeen: false
   };
   const preferencesKey = 'mbgc:preferences';
+  const termPreferenceValid = (value) => typeof value === 'string' && (value === 'current' || /^term:[\w.-]{1,80}$/.test(value));
   const methodValid = (method) => typeof method === 'string' && Object.hasOwn(app.methods, method);
   const classIdValid = (id) => typeof id === 'string' && /^\d+$/.test(id);
   const methodFor = (settings, id) => {
@@ -13,6 +14,8 @@
   };
   const normalizeSettings = (stored) => ({ ...settingsDefaults, ...stored,
     method: methodFor(stored ?? {}),
+    academicTerm: termPreferenceValid(stored?.academicTerm) ? stored.academicTerm : 'current',
+    compareMethods: stored?.compareMethods === true,
     appearance: ['system', 'light', 'dark'].includes(stored?.appearance) ? stored.appearance : 'system',
     subjectMethods: Object.fromEntries(Object.entries(stored?.subjectMethods ?? {}).filter(([id, method]) =>
       classIdValid(id) && methodValid(method))) });
@@ -28,7 +31,7 @@
       if (!Object.hasOwn(settingsDefaults, key) || key === 'subjectMethods') continue;
       const allowed = { appearance: ['system', 'light', 'dark'], density: ['comfortable', 'compact'],
         motion: ['full', 'reduced', 'off'] }[key];
-      if (key === 'method' ? methodValid(value) : allowed ? allowed.includes(value) :
+      if (key === 'method' ? methodValid(value) : key === 'academicTerm' ? termPreferenceValid(value) : allowed ? allowed.includes(value) :
         typeof settingsDefaults[key] === 'boolean' ? typeof value === 'boolean' :
           key === 'refreshMinutes' && Number.isFinite(value) && value >= 0 && value <= 120) next[key] = value;
     }
@@ -189,5 +192,5 @@
     }
   }
 
-  Object.assign(app, { settingsDefaults, preferencesKey, methodFor, normalizeSettings, patchSettings, freshCache, mergeScan, mergeCheck, currentTerms, classTermKey });
+  Object.assign(app, { termPreferenceValid, settingsDefaults, preferencesKey, methodFor, normalizeSettings, patchSettings, freshCache, mergeScan, mergeCheck, currentTerms, classTermKey });
 })();

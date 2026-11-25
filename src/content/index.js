@@ -8,7 +8,7 @@
 
   async function isolateDashboard() {
     try {
-      const sheets = await Promise.all(['tokens.css', 'styles.css'].map(async (name) => {
+      const sheets = await Promise.all(['tokens.css', 'styles.css', 'grade-tools.css'].map(async (name) => {
         const response = await fetch(chrome.runtime.getURL('src/ui/' + name));
         if (!response.ok) throw new Error('Unable to load extension styles');
         const sheet = new CSSStyleSheet();
@@ -405,6 +405,15 @@
       view = freshView();
       force = true;
     }
+    if (view.termPreference !== sync.settings.academicTerm) {
+      view.termPreference = sync.settings.academicTerm;
+      view.requestedTerm = view.termPreference;
+      view.scenario = null;
+    }
+    if (view.goalRevision !== sync.goalRevision) {
+      view.goalRevision = sync.goalRevision;
+      if (view.goalLibrary) view.goalLibrary.loaded = false;
+    }
     installNav();
     app.bindNativeComponents(nativeAnchor);
     updateNativeIcons(nativeAnchor);
@@ -436,7 +445,7 @@
     if (panel) {
       card.remove();
       mountDashboard();
-      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.refreshing, sync.refreshIssue,
+      const contentKey = JSON.stringify([panel, sync.settings, sync.revision, sync.overrides, sync.predictionRevision, sync.goalRevision, sync.refreshing, sync.refreshIssue,
         sync.message, sync.diagnostics, sync.storageState, sync.account, sync.identityStatus, [...changed]]);
       if (force || viewKey !== contentKey) {
         const editor = stageHost.shadowRoot?.activeElement ?? document.activeElement;
@@ -648,8 +657,21 @@
       for (const [id, name] of Object.entries(app.discoverClasses(document, location.href))) {
         if (!discovered[id]) discovered[id] = name;
       }
-      respond({ subjects: Object.entries(discovered), lastSync: sync.cache.lastSync, refreshing: sync.refreshing,
-        issue: sync.refreshIssue || sync.storageState === 'unavailable', menuAttached: Boolean(nativeAnchor?.isConnected), theme });
+      const terms = sync.settings.compareMethods ? Object.fromEntries(Object.entries(sync.cache.classes).map(([id, subject]) =>
+        [id, Object.entries(subject.terms).filter(([, bucket]) => bucket.termId).map(([key, bucket]) => [key, bucket.label])])) : {};
+      respond({ subjects: Object.entries(discovered), terms, activeTerm: view.term ?? sync.settings.academicTerm,
+        lastSync: sync.cache.lastSync, refreshing: sync.refreshing, issue: sync.refreshIssue || sync.storageState === 'unavailable', menuAttached: Boolean(nativeAnchor?.isConnected), theme });
+    }
+    if (message?.type === 'mbgc:popup-comparison' && sync.settings.compareMethods) {
+      const subject = Object.hasOwn(sync.cache.classes, message.classId) && sync.cache.classes[message.classId];
+      const key = message.term === app.currentTerms ? app.classTermKey(subject) : message.term;
+      if (!subject || !Object.hasOwn(subject.terms, key)) respond({ value: null });
+      else respond({ value: app.compareMethods(app.gradeData(sync, message.classId, key)) });
+    }
+    if (message?.type === 'mbgc:popup-transfer' && ['grades', 'backup', 'preview', 'restore'].includes(message.operation)) {
+      sync.transfer(message.operation, { backup: message.backup, token: message.token })
+        .then((value) => respond({ value }), (error) => respond({ error: error.message }));
+      return true;
     }
     if (message?.type === 'mbgc:popup-open' && sync.settings.enabled &&
       ['grades', 'estimator', 'settings'].includes(message.view)) {

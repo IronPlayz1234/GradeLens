@@ -2,6 +2,8 @@
   const app = globalThis.MBGC;
   const prefsKey = app.preferencesKey;
   const overrideKey = (account) => 'mbgc:overrides:' + location.host + ':' + account;
+  const predictionKey = (account) => 'mbgc:predictions:' + location.host + ':' + account;
+  const goalsKey = (account) => 'mbgc:goal-plans:' + location.host + ':' + account;
   const parallelPages = 3;
   const pageLimit = 72;
   const requestSpacing = 160;
@@ -60,6 +62,10 @@
     cache = app.freshCache();
     settings = { ...app.settingsDefaults };
     overrides = { weights: {}, scale: null };
+    predictions = [];
+    predictionRevision = 0;
+    predictionWrites = new Map();
+    goalRevision = 0;
     refreshing = false;
     message = '';
     lastAttempt = 0;
@@ -106,6 +112,20 @@
           this.overrides = changes[overrideKey(this.account)].newValue ?? { weights: {}, scale: null };
           this.update();
         }
+        if (this.account && area === 'local' && changes[predictionKey(this.account)]) {
+          const values = new Map((changes[predictionKey(this.account)].newValue ?? []).map((item) => [app.predictionScope(item), item]));
+          for (const [scope, prediction] of this.predictionWrites) {
+            if (prediction.entries.length || Object.keys(prediction.overrides).length) values.set(scope, prediction);
+            else values.delete(scope);
+          }
+          this.predictions = [...values.values()];
+          this.predictionRevision++;
+          this.update();
+        }
+        if (this.account && area === 'local' && changes[goalsKey(this.account)]) {
+          this.goalRevision++;
+          this.update();
+        }
       });
     }
 
@@ -146,6 +166,9 @@
       this.cache = app.freshCache();
       this.revision++;
       this.overrides = { weights: {}, scale: null };
+      this.predictions = [];
+      this.predictionWrites.clear();
+      this.predictionRevision++;
       this.signature = '';
       this.pendingSnapshots = [];
       this.pendingChecks = [];
@@ -159,14 +182,18 @@
       this.update();
       if (!next) return;
       const [cache, local] = await Promise.allSettled([
-        request('get', next), chrome.storage.local.get(overrideKey(next))
+        request('get', next), chrome.storage.local.get([overrideKey(next), predictionKey(next)])
       ]);
       if (this.account !== next) return;
       if (cache.status === 'fulfilled') {
         this.installCache(cache.value);
         this.storageState = 'session';
       } else this.storageState = 'unavailable';
-      if (local.status === 'fulfilled') this.overrides = local.value[overrideKey(next)] ?? this.overrides;
+      if (local.status === 'fulfilled') {
+        this.overrides = local.value[overrideKey(next)] ?? this.overrides;
+        this.predictions = local.value[predictionKey(next)] ?? this.predictions;
+        this.predictionRevision++;
+      }
     }
 
     scanVisible(rows = null) {
@@ -305,6 +332,33 @@
 
     setSubjectMethod(id, method) {
       return this.savePreferences({ subject: { id, method } });
+    }
+
+    async transfer(operation, options = {}) {
+      if (operation === 'grades') return app.gradeExport(this.cache, this.settings, this.overrides);
+      const account = this.account ?? null;
+      const reply = await request('settings-transfer', account, { operation, ...options });
+      if ((this.account ?? null) !== account) throw new Error('The active student changed. Reopen the preview.');
+      return reply;
+    }
+
+    async savePredictions(classId, termId, entries, overrides) {
+      const account = this.account;
+      if (!account) return true;
+      const scope = app.predictionScope({ classId, termId });
+      let prediction;
+      try {
+        prediction = app.prediction({ classId, termId, entries, overrides });
+        this.predictionWrites.set(scope, prediction);
+        this.predictions = this.predictions.filter((item) => app.predictionScope(item) !== scope);
+        if (prediction.entries.length || Object.keys(prediction.overrides).length) this.predictions.push(prediction);
+        await request('predictions', account, { prediction });
+        return true;
+      } catch {
+        return false;
+      } finally {
+        if (prediction && this.predictionWrites.get(scope) === prediction) this.predictionWrites.delete(scope);
+      }
     }
 
     async goalPlans(operation, plan) {

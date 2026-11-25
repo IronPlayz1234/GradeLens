@@ -1,4 +1,4 @@
-importScripts('core/grades.js', 'core/goal-planner.js', 'core/cache.js', 'repository.js', 'appearance-registry.js');
+importScripts('core/grades.js', 'core/goal-planner.js', 'core/cache.js', 'core/settings-backup.js', 'repository.js', 'appearance-registry.js', 'backup-storage.js');
 
 const app = globalThis.MBGC;
 const origin = 'https://uia.managebac.com';
@@ -70,6 +70,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }).then((value) => respond({ value }), () => respond({ error: 'Preferences could not be saved.' }));
     return true;
   }
+  if (sender.id === chrome.runtime.id && message?.type === 'mbgc:settings-transfer' &&
+      (student || sender.url === chrome.runtime.getURL('popup.html'))) {
+    enqueue(() => {
+      const account = student && /^(?:\d+|profile-[a-f0-9]{64})$/.test(message.account ?? '') ? message.account : null;
+      return settingsTransfer(message, sender, account, new URL(origin).host);
+    }).then((value) => respond({ value }), (error) => respond({ error: error.message }));
+    return true;
+  }
   if (sender.id !== chrome.runtime.id || (sender.origin != null && sender.origin !== origin) || sender.frameId !== 0 || !/^https:\/\/uia\.managebac\.com\/student(?:[/?#]|$)/.test(sender.url ?? '') ||
     typeof message !== 'object' || !message?.type?.startsWith('mbgc:')) return;
   const work = enqueue(async () => {
@@ -77,6 +85,16 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (!account) throw new Error('A student account was not identified.');
     const key = `mbgc:cache:${new URL(origin).host}:${account}`;
     const overrideKey = `mbgc:overrides:${new URL(origin).host}:${account}`;
+    if (message.type === 'mbgc:predictions') {
+      const prediction = app.prediction(message.prediction);
+      const storageKey = studentStorageKeys(new URL(origin).host, account).predictions;
+      const stored = (await chrome.storage.local.get(storageKey))[storageKey] ?? [];
+      const scope = app.predictionScope(prediction);
+      const saved = stored.filter((item) => app.predictionScope(item) !== scope);
+      if (prediction.entries.length || Object.keys(prediction.overrides).length) saved.push(prediction);
+      await chrome.storage.local.set({ [storageKey]: saved });
+      return { saved: true };
+    }
     if (message.type === 'mbgc:goal-plans') {
       const storageKey = `mbgc:goal-plans:${new URL(origin).host}:${account}`;
       const saved = (await chrome.storage.local.get(storageKey))[storageKey] ?? [];

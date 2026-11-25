@@ -1,0 +1,36 @@
+.gl-comparison, .gl-transfer-body { display: grid; gap: 8px; }
+.gl-comparison-grid { display: grid; gap: 6px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.gl-comparison-method {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--mbgc-border, var(--border));
+  border-radius: var(--gl-radius-control, 7px);
+  overflow-wrap: anywhere;
+}
+.gl-comparison-method[data-selected] {
+  background: var(--mbgc-tint, var(--mbgc-highlight, var(--background)));
+  border-color: var(--mbgc-ink, var(--site-ink));
+}
+.gl-comparison-label { font-size: 12px; line-height: 1.25; }
+.gl-comparison-score { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; margin-block-start: auto; }
+.gl-tool-note { margin: 0; color: var(--mbgc-muted, var(--muted)); font-size: 12px; overflow-wrap: anywhere; }
+.gl-transfer-body { padding: 4px 11px 10px; }
+.gl-transfer-review {
+  background: var(--mbgc-base, var(--background));
+  border-radius: var(--gl-radius-control, 7px);
+  padding: 9px;
+}
+.gl-transfer-review:empty, .gl-transfer .gl-tool-note[role="status"]:empty { display: none; }
+.gl-transfer-review ul { margin-block: 7px; padding-inline-start: 18px; overflow-wrap: anywhere; }
+.gl-transfer-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.gl-transfer-review .gl-transfer-actions { margin-block-start: 8px; }
+.gl-transfer-actions button { white-space: normal; min-width: 0; }
+.mbgc-settings .gl-transfer { border: 1px solid var(--mbgc-border); border-radius: var(--mbgc-radius); }
+.mbgc-settings .gl-transfer > summary { padding: 9px 11px; cursor: pointer; font-weight: 650; }
+.mbgc-owned .gl-methods .gl-comparison { padding: 8px 0 3px; }
+.mbgc-popup .gl-transfer-review { max-block-size: 260px; overflow-y: auto; }
+@media (max-width: 360px) {
+  .gl-comparison-grid { grid-template-columns: 1fr; }
+}

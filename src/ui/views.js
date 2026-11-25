@@ -30,7 +30,8 @@
 
   function termOptionsFor(sync, view) {
     const options = [[app.currentTerms, 'Current class terms'], ...terms(sync)];
-    if (!options.some(([id]) => id === view.term)) view.term = app.currentTerms;
+    const preferred = view.requestedTerm ?? sync.settings.academicTerm;
+    view.term = options.some(([id]) => id === preferred) ? preferred : app.currentTerms;
     return options;
   }
 
@@ -91,19 +92,12 @@
 
   const calculated = new WeakMap();
   function gradeData(sync, classId, termKey) {
-    const entry = sync.cache.classes[classId];
-    const bucket = entry?.terms[termKey];
+    const data = app.gradeInputs(sync.cache, sync.settings, sync.overrides, classId, termKey);
+    const { bucket, verified, weights, error, method } = data;
     const cached = bucket && calculated.get(bucket);
-    const verified = Boolean(bucket?.termId);
-    const customWeights = sync.overrides.weights[classId];
-    const weights = customWeights ?? bucket?.weights ?? {};
-    const error = bucket?.lastErrorAt ? bucket.lastError : entry?.lastError;
-    const scale = sync.overrides.scale ?? bucket?.scale ?? app.defaultScale;
-    const scaleLabel = sync.overrides.scale ? 'Custom letter scale' : bucket?.scale ? 'Displayed task letter scale' : 'Default task letter scale';
-    const method = app.methodFor(sync.settings, classId);
     const compatible = cached?.weights === weights && cached.method === method && cached.revision === bucket?.dataRevision;
-    const tasks = compatible ? cached.tasks : Object.values(bucket?.records ?? {}).sort((a, b) => a.title.localeCompare(b.title));
-    const result = compatible ? cached.result : app.calculate(verified ? tasks : [], weights, method);
+    const tasks = compatible ? cached.tasks : data.tasks.sort((a, b) => a.title.localeCompare(b.title));
+    const result = compatible ? cached.result : app.estimate({ ...data, tasks }, method);
     if (bucket && !compatible) calculated.set(bucket, { tasks, result, weights, method, revision: bucket.dataRevision });
     const lastSource = { rendered: 'rendered student page', background: 'background HTML' }[bucket?.lastSource];
     const provenance = lastSource
@@ -117,8 +111,7 @@
           bucket?.complete ? 'No graded assessments in this term.' :
             'Could not verify graded assessments for this term.') :
           result.percentage === null ? 'No graded assessments have a positive category weight.' : '';
-    return { classId, method, title: entry?.name || `Class ${classId}`, bucket, tasks, verified, weights, scale, scaleLabel,
-      result, stale, customWeights: Boolean(customWeights), error, missing, provenance, termKey, label: bucket?.label || 'Unidentified term' };
+    return { ...data, tasks, result, stale, missing, provenance };
   }
 
   function score(value, scale, className = '') {
@@ -311,7 +304,7 @@
     const details = h('details', 'mbgc-subject');
     details.dataset.classId = data.classId;
     details.gradeEntry = sync.cache.classes[data.classId];
-    details.gradeKey = JSON.stringify([data.termKey, data.bucket?.dataRevision, data.method, sync.settings.method, sync.settings.subjectMethods?.[data.classId], data.weights, data.scaleLabel,
+    details.gradeKey = JSON.stringify([data.termKey, data.bucket?.dataRevision, data.method, sync.settings.method, sync.settings.subjectMethods?.[data.classId], data.weights, data.scale, data.scaleLabel, sync.settings.compareMethods,
       data.stale, data.error, view.changed.has(data.classId + ':' + data.termKey)]);
     details.open = view.expanded.has(data.classId);
     let breakdown;
@@ -327,6 +320,21 @@
         openBreakdown();
       } else view.expanded.delete(data.classId);
     });
+    const comparison = sync.settings.compareMethods ? h('details', 'mbgc-overrides gl-methods', h('summary', '', 'Compare methods')) : null;
+    if (comparison) {
+      const openComparisons = view.openComparisons ??= new Set();
+      const key = data.classId + ':' + data.termKey;
+      comparison.open = openComparisons.has(key);
+      const populate = () => {
+        if (!comparison.querySelector('.gl-comparison')) comparison.append(app.comparisonContent(app.compareMethods(data)));
+      };
+      comparison.addEventListener('toggle', () => {
+        if (!comparison.isConnected) return;
+        if (comparison.open) { openComparisons.add(key); populate(); }
+        else openComparisons.delete(key);
+      });
+      if (comparison.open) populate();
+    }
     const uri = '/student/classes/' + data.classId + '/core_tasks';
     const open = h('a', 'mbgc-text-link', 'Open class Tasks', icon('arrow'));
     open.href = uri;
@@ -343,7 +351,7 @@
         h('span', 'mbgc-subject-status', gradeInfo(data, 'mbgc-subject-info-' + data.classId)),
         h('span', 'mbgc-chevron', icon('chevron'))),
       h('div', 'mbgc-subject-detail',
-        subjectMethod(sync, data.classId),
+        subjectMethod(sync, data.classId), comparison,
         data.missing ? h('p', 'mbgc-notice', data.missing) : null,
         data.error ? h('p', 'mbgc-notice', data.error) :
           data.bucket?.lastScan && !data.bucket.complete ? h('p', 'mbgc-muted',
@@ -381,6 +389,11 @@
     const content = h('details', 'mbgc-settings');
     content.open = view.settings;
     content.addEventListener('toggle', () => { view.settings = content.open; });
+    const compare = h('input', 'mbgc-checkbox');
+    compare.type = 'checkbox';
+    compare.checked = sync.settings.compareMethods;
+    compare.addEventListener('change', () => sync.setSettings({ compareMethods: compare.checked }));
+    const transfers = app.transferPanel((operation, payload) => sync.transfer(operation, payload), view.transfer ??= {}, handlers.render);
     const text = h('p', 'mbgc-muted', 'Refresh checks student-visible pages while ManageBac is active. Enter 0 to turn off periodic checks.');
     const minutes = numericInput(sync.settings.refreshMinutes, 0, 120, '1');
     minutes.addEventListener('change', () => {
@@ -441,10 +454,11 @@
           button('Show welcome guide', handlers.showWelcome, 'info')),
         h('p', 'mbgc-muted', 'GradeLens ', chrome.runtime.getManifest().version, ' · Created by Sohan Tripathy — Inspired by Savir Bhaiya'),
         h('div', 'mbgc-settings-grid',
-          h('div', '', field('Refresh interval (minutes)', minutes), text),
+          h('div', '', field('Refresh interval (minutes)', minutes), text,
+            h('label', 'mbgc-toggle-label', compare, 'Show all three calculation methods')),
           h('div', '', field('Class for manual weights', classChoice), field('Category weights', weights)),
           h('div', '', field('Letter boundaries', scale), h('p', 'mbgc-muted', 'Leave overrides blank to use detected values or the default task scale.'))),
-        h('div', 'mbgc-actions', save, clear), feedback));
+        h('div', 'mbgc-actions', save, clear), feedback, transfers));
     if (!subjects.length) {
       classChoice.disabled = true;
       weights.disabled = true;
@@ -485,8 +499,9 @@
   function header(sync, kind, view, handlers, termOptions) {
     const isEstimator = kind === 'estimator';
     const termChoice = select(termOptions, view.term, (id) => {
-      view.term = id;
+      view.requestedTerm = id;
       view.scenario = null;
+      if (app.termPreferenceValid(id)) void sync.setSettings({ academicTerm: id });
       handlers.render();
     });
     termChoice.disabled = !termOptions.length;
@@ -651,7 +666,29 @@
       return { entries: [], overrides: {}, pick: firstCategory, points: 80, max: 100, replaces: '',
         target: 80, targetMode: 'percentage', targetLetter: data.scale.find(([min]) => min <= 80)?.[1] ?? data.scale[0][1] };
     }
+    const savedPrediction = sync.predictions.find((item) => item.classId === data.classId && item.termId === data.bucket.termId);
+    const initializing = !view.scenario;
     const model = view.scenario ??= defaults();
+    if (initializing || view.scenarioStored !== savedPrediction) {
+      view.scenarioStored = savedPrediction;
+      model.entries = (savedPrediction?.entries ?? []).map((item) => ({ ...item }));
+      model.overrides = { ...savedPrediction?.overrides };
+      view.nextId = Math.max(view.nextId, ...model.entries.map((item) => Number(item.id.split(':')[1]) || 0));
+      if (initializing && model.entries.length) { model.previewPaused = true; view.scenariosOpen = true; }
+      if (model.editing && !model.entries.some((item) => item.id === model.editing)) delete model.editing;
+    }
+    const persistenceFeedback = h('p', 'mbgc-feedback', view.predictionError);
+    persistenceFeedback.setAttribute('role', 'status');
+    function persistPrediction() {
+      const { entries, overrides } = view.scenario;
+      view.predictionError = '';
+      void sync.savePredictions(data.classId, data.bucket.termId, entries, overrides).then((saved) => {
+        if (!saved) {
+          view.predictionError = 'Could not save predictions. The current what-if calculation is still available.';
+          handlers.render();
+        }
+      });
+    }
     if (!categories.includes(model.pick)) model.pick = firstCategory;
     const replaceable = data.tasks.filter((task) => app.validScore(task) &&
       categories.some((name) => app.key(name) === app.key(task.category)) &&
@@ -809,6 +846,7 @@
       delete model.title;
       model.replaces = '';
       model.previewPaused = true;
+      persistPrediction();
       handlers.render();
     }, 'plus', 'mbgc-primary');
     const scenarios = h('div', 'mbgc-scenarios',
@@ -822,6 +860,7 @@
         button('Remove', () => {
           model.entries = model.entries.filter((entry) => entry.id !== task.id);
           if (model.editing === task.id) { delete model.editing; model.replaces = ''; }
+          persistPrediction();
           handlers.render();
         }))));
     function disclosure(title, key, ...children) {
@@ -845,10 +884,12 @@
         else if (control.checkValidity()) model.overrides[id] = control.valueAsNumber;
         update();
       });
+      control.addEventListener('change', persistPrediction);
       overrideDetails.append(field(name + ' (%)', control));
     }
     const restore = () => {
       view.scenario = { ...defaults(), previewPaused: true };
+      persistPrediction();
       handlers.render();
     };
     prediction.append(h('h2', '', 'Grade projection'),
@@ -864,7 +905,7 @@
         model.targetMode === 'letter' ? field('Letter grade', targetLetter) : field('Target (%)', targetNumber)), targetResult);
     const saved = disclosure('Saved predictions' + (model.entries.length ? ` (${model.entries.length})` : ''), 'scenariosOpen',
       model.entries.length ? scenarios : h('p', 'mbgc-muted', 'Choose Add to prediction to save a score and try another.'),
-      h('div', 'mbgc-actions', button('Reset', () => { view.scenario = defaults(); handlers.render(); })));
+      h('div', 'mbgc-actions', button('Reset', () => { view.scenario = defaults(); persistPrediction(); handlers.render(); })));
     section.append(
       h('div', 'mbgc-estimator-grid',
         h('section', 'mbgc-panel mbgc-model',
@@ -877,7 +918,7 @@
           h('div', 'mbgc-form-grid', field('Earned points', points), field('Maximum points', max)),
           h('div', 'mbgc-slider-row', slider, sliderValue), warning,
           h('div', 'mbgc-actions', add, button('Clear predictions', restore)),
-          saved, overrideDetails),
+          persistenceFeedback, saved, overrideDetails),
         h('div', 'mbgc-estimator-results', prediction, targetDetails, breakdown)));
     update();
     return page;

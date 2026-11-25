@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { parseHTML } = require('linkedom');
 require('../src/core/grades.js');
 require('../src/core/cache.js');
+require('../src/core/grade-report.js');
 require('../src/content/scanner.js');
 const app = globalThis.MBGC;
 const host = 'https://uia.managebac.com';

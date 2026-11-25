@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GradeLens \u2014 for ManageBac",
-  "version": "1.28",
+  "version": "1.29",
   "icons": {
     "16": "assets/icons/gradelens-16.png",
     "32": "assets/icons/gradelens-32.png",
@@ -31,6 +31,7 @@
     {
       "resources": [
         "src/ui/styles.css",
+        "src/ui/grade-tools.css",
         "src/ui/tokens.css",
         "assets/icons/gradelens-48.png",
         "assets/patterns/school-doodles-dark.webp"
@@ -49,6 +50,7 @@
       "css": [
         "src/ui/tokens.css",
         "src/ui/styles.css",
+        "src/ui/grade-tools.css",
         "src/ui/native-dark.css",
         "src/ui/native-components.css",
         "src/ui/native-paint.css"
@@ -69,9 +71,12 @@
         "src/core/grades.js",
         "src/core/goal-planner.js",
         "src/core/cache.js",
+        "src/core/grade-report.js",
+        "src/core/settings-backup.js",
         "src/content/scanner.js",
         "src/content/sync.js",
         "src/ui/icons.js",
+        "src/ui/grade-tools.js",
         "src/ui/views.js",
         "src/ui/goal-planner.js",
         "src/content/native-components.js",

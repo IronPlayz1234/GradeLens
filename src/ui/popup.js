@@ -10,6 +10,75 @@
   let state;
   let rosterKey;
   let inFlight = false;
+  const comparison = byId('compare-panel');
+  const compareSubject = byId('compare-subject');
+  const compareTerm = byId('compare-term');
+  const results = byId('compare-results');
+  let compareSequence = 0;
+  let comparisonKey;
+  let selectedTerm = '';
+  let comparisonSubjectKey;
+  let comparisonTermKey;
+
+  function updateOptions(subjects) {
+    comparison.hidden = !settings.compareMethods;
+    if (!settings.compareMethods) return;
+    const before = compareSubject.value;
+    const subjectOptions = subjects.map(([id, name]) => [id, name || 'Class ' + id]);
+    const roster = JSON.stringify(subjectOptions);
+    if (comparisonSubjectKey !== roster) {
+      comparisonSubjectKey = roster;
+      options(compareSubject, subjectOptions);
+      if (subjectOptions.some(([id]) => id === before)) compareSubject.value = before;
+    }
+    const choices = [['current', 'Current class term'], ...(state?.terms?.[compareSubject.value] ?? [])];
+    const key = JSON.stringify(choices);
+    if (comparisonTermKey !== key) { comparisonTermKey = key; options(compareTerm, choices); }
+    const preferred = selectedTerm || state?.activeTerm || settings.academicTerm;
+    compareTerm.value = choices.some(([id]) => id === preferred) ? preferred : 'current';
+    compareSubject.disabled = !subjects.length;
+    compareTerm.disabled = !subjects.length;
+  }
+
+  function showComparison(data, text) {
+    const key = JSON.stringify([data, text]);
+    if (comparisonKey === key) return;
+    comparisonKey = key;
+    if (data) results.replaceChildren(app.comparisonContent(data));
+    else {
+      const note = document.createElement('p');
+      note.className = 'hint';
+      note.textContent = text;
+      results.replaceChildren(note);
+    }
+  }
+
+  async function refreshComparison() {
+    if (comparison.hidden || !comparison.open) return;
+    const sequence = ++compareSequence;
+    if (tab?.id == null || !compareSubject.value) {
+      showComparison(null, 'Open a signed-in ManageBac tab with available classes.');
+      return;
+    }
+    if (!results.childElementCount) showComparison(null, 'Reading the available term grades…');
+    try {
+      const reply = await chrome.tabs.sendMessage(tab.id, { type: 'mbgc:popup-comparison',
+        classId: compareSubject.value, term: compareTerm.value }, { frameId: 0 });
+      if (sequence !== compareSequence) return;
+      showComparison(reply?.value, 'No class grade data is available for this term yet.');
+    } catch {
+      if (sequence === compareSequence) showComparison(null, 'Could not read this tab. Refresh the ManageBac tab and try again.');
+    }
+  }
+
+  async function transfer(operation, payload) {
+    if (operation === 'grades' && !tab?.id) throw new Error('Open a signed-in ManageBac tab to export grades.');
+    const reply = tab?.id != null ?
+      await chrome.tabs.sendMessage(tab.id, { type: 'mbgc:popup-transfer', operation, ...payload }, { frameId: 0 }) :
+      await chrome.runtime.sendMessage({ type: 'mbgc:settings-transfer', operation, ...payload });
+    if (!reply || reply.error) throw new Error(reply?.error ?? 'GradeLens could not access local storage. Reopen the popup and try again.');
+    return reply.value;
+  }
 
   function options(select, entries) {
     select.replaceChildren(...entries.map(([value, label]) => new Option(label, value)));
@@ -48,6 +117,7 @@
       input.value = settings.subjectMethods[input.dataset.classId] ?? '';
       input.title = app.methods[input.value]?.label ?? 'Use Global Default';
     }
+    updateOptions(subjects);
     for (const button of actions) button.disabled = !settings.enabled || !state;
     byId('sync').textContent = !state ? 'Open a signed-in ManageBac student tab for subjects and sync status.' :
       !settings.enabled ? 'GradeLens is paused on ManageBac.' :
@@ -74,6 +144,7 @@
     } finally {
       inFlight = false;
       render();
+      void refreshComparison();
     }
   }
 
@@ -88,6 +159,19 @@
     }
   }
 
+  comparison.addEventListener('toggle', () => void refreshComparison());
+  compareSubject.addEventListener('change', () => {
+    selectedTerm = '';
+    render();
+    showComparison(null, 'Reading the available term grades…');
+    void refreshComparison();
+  });
+  compareTerm.addEventListener('change', () => {
+    selectedTerm = compareTerm.value;
+    showComparison(null, 'Reading the available term grades…');
+    void refreshComparison();
+  });
+  byId('transfer-settings').append(app.transferPanel(transfer));
   options(byId('method'), methodOptions);
   byId('version').textContent = 'v' + chrome.runtime.getManifest().version;
   document.addEventListener('change', ({ target }) => {

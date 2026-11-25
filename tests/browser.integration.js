@@ -2013,3 +2013,189 @@ test('Goal Planner edits, stores and reopens a term-specific plan with current g
     await fs.rm(profile, { recursive: true, force: true });
   }
 });
+
+test('compare, export and restore safely through the popup and Overall Grades', { timeout: 65000 }, async () => {
+  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-grade-tools-'));
+  const base = (await fixture('class-tasks')).replace('<html lang="en"', '<html data-theme="teal" lang="en"');
+  const secondTerm = base.replace('value="71" selected', 'value="71"')
+    .replace('value="72">', 'value="72" selected>').replace('data-term-id="71"', 'data-term-id="72"')
+    .replace('8 / 10 pts', '0 / 10 pts');
+  const isolate = process.env.MBGC_RESTORE_BROWSER_PATH;
+  let context;
+  async function open(profile, executablePath = browserPath) {
+    context = await chromium.launchPersistentContext(profile, {
+      ...(executablePath ? { executablePath } : { channel: 'chromium' }), headless: true, acceptDownloads: true,
+      args: ['--disable-extensions-except=' + root, '--load-extension=' + root], viewport: { width: 1100, height: 900 }
+    });
+    context.setDefaultTimeout(8500);
+    await context.route(host + '/**', (entry) => {
+      const url = new URL(entry.request().url());
+      const html = url.pathname === tasksPath ? (url.searchParams.get('term_id') === '72' ? secondTerm : base) :
+        '<header><a href="/student/profile/9">Manage Your Profile</a></header><main>Workspace</main>';
+      return entry.fulfill({ contentType: 'text/html', body: html });
+    });
+    return context.serviceWorkers()[0] ?? context.waitForEvent('serviceworker');
+  }
+  const profile = path.join(folder, 'primary');
+  const prefsKey = 'mbgc:preferences';
+  const extra = ['mbgc:overrides:uia.managebac.com:9', 'mbgc:predictions:uia.managebac.com:9', 'mbgc:goal-plans:uia.managebac.com:9'];
+  const files = (text) => ({ name: 'settings-test.json', mimeType: 'application/json', buffer: Buffer.from(text) });
+  async function popupFor(worker) {
+    const popup = await context.newPage();
+    await popup.setViewportSize({ width: 400, height: 660 });
+    await popup.goto(worker.url().split('/src/')[0] + '/popup.html');
+    return popup;
+  }
+  async function download(page, name, dest) {
+    const pending = page.waitForEvent('download');
+    await page.getByRole('button', { name, exact: true }).click();
+    const file = await pending;
+    await file.saveAs(dest);
+    return fs.readFile(dest, 'utf8');
+  }
+
+  try {
+    let worker = await open(profile);
+    await worker.evaluate(() => chrome.storage.local.set({
+      'mbgc:preferences': { method: 'percentage', appearance: 'dark', refreshMinutes: 0, welcomeSeen: true }
+    }));
+    let page = await context.newPage();
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact').getByText('74.50%').waitFor();
+    await page.goto(host + tasksPath + '?term_id=72');
+    await page.locator('.mbgc-compact').getByText(/Semester 2/).waitFor();
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact').getByText('74.50%').waitFor();
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    await page.getByLabel('Academic term', { exact: true }).selectOption('term:71');
+    await page.locator('.mbgc-subject[data-class-id="123"] summary').first().click();
+    await page.locator('.mbgc-subject[data-class-id="123"]').getByLabel('Subject calculation method').selectOption('absolute');
+    const mainGrade = page.locator('.mbgc-subject[data-class-id="123"] .mbgc-subject-grade');
+    await mainGrade.getByText('72.31%').waitFor();
+
+    let popup = await popupFor(worker);
+    const compare = popup.getByRole('switch', { name: 'Show all three calculation methods' });
+    await compare.check();
+    await popup.getByText('Compare methods', { exact: true }).click();
+    await popup.getByLabel('Comparison subject').selectOption('123');
+    await popup.getByLabel('Comparison term').selectOption('term:71');
+    await popup.locator('.gl-comparison-method[data-selected]').getByText('72.31% · B').waitFor();
+    await popup.locator('.gl-comparison-grid').getByText('74.50% · B').waitFor();
+    await popup.locator('.gl-comparison-grid').getByText('72.25% · B').waitFor();
+    await popup.getByLabel('Comparison term').selectOption('term:72');
+    await popup.locator('.gl-comparison-method[data-selected]').getByText('53.85% · D').waitFor();
+    await popup.getByLabel('Comparison term').selectOption('term:71');
+    if (process.env.MBGC_AUDIT_SCREENSHOTS) await popup.screenshot({ path: path.join(process.env.MBGC_AUDIT_SCREENSHOTS, 'comparison-popup.png'), fullPage: true });
+    await page.locator('.mbgc-subject[data-class-id="123"]').getByText('Compare methods', { exact: true }).click();
+    await page.locator('.gl-comparison-grid').getByText('74.50% · B').waitFor();
+    assert.match(await mainGrade.textContent(), /72\.31%/);
+    await compare.uncheck();
+    await page.locator('.mbgc-subject[data-class-id="123"]').getByText('Compare methods', { exact: true }).waitFor({ state: 'detached' });
+    await mainGrade.getByText('72.31%').waitFor();
+    await compare.check();
+
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    await page.getByRole('button', { name: 'Add to prediction' }).click();
+    await page.locator('.mbgc-scenario').first().waitFor();
+    await page.getByRole('tab', { name: 'Goal Planner' }).click();
+    await page.getByRole('button', { name: 'Add assessment' }).click();
+    await page.getByLabel('Plan name').fill('Exported goal');
+    await page.getByRole('button', { name: 'Save plan' }).click();
+    await page.getByText('Plan saved.', { exact: true }).waitFor();
+    await popup.bringToFront();
+    await popup.getByText('Export & Backup', { exact: true }).click();
+    const json = JSON.parse(await download(popup, 'Export Grades as JSON', path.join(folder, 'grades.json')));
+    assert.equal(json.format, 'gradelens-grades');
+    const subject = json.subjects.find((item) => item.classId === '123');
+    assert.equal(subject.selectedMethod, 'absolute');
+    assert.equal(subject.terms.find((term) => term.id === '72').assessments.find((task) => task.id === '1').earnedPoints, 0);
+    assert.ok(!JSON.stringify(json).includes('taskUrl'));
+    const csv = await download(popup, 'Export Grades as CSV', path.join(folder, 'grades.csv'));
+    assert.match(csv, /^\ufeffrow_type,subject/);
+    assert.match(csv, /Networks short answer/);
+
+    const backupText = await download(popup, 'Back Up Settings', path.join(folder, 'settings.json'));
+    const backup = JSON.parse(backupText);
+    assert.deepEqual([backup.format, backup.version, backup.preferences.academicTerm], ['gradelens-settings', 2, 'term:71']);
+    assert.equal(backup.preferences.compareMethods, true);
+    assert.equal(backup.preferences.subjectMethods['123'], 'absolute');
+    assert.equal(backup.student.goalPlans[0].name, 'Exported goal');
+    assert.equal(backup.student.predictions[0].entries.length, 1);
+    assert.ok(!Object.hasOwn(backup, 'subjects'));
+
+    await worker.evaluate(async ([prefs, , predictions, plans]) => {
+      const current = (await chrome.storage.local.get(prefs))[prefs];
+      await chrome.storage.local.set({ [prefs]: { ...current, compareMethods: false, appearance: 'light', subjectMethods: {} },
+        [predictions]: [], [plans]: [] });
+    }, [prefsKey, ...extra]);
+    const currentStorage = () => worker.evaluate((keys) => chrome.storage.local.get(keys), [prefsKey, ...extra]);
+    const changed = await currentStorage();
+    const picker = popup.getByLabel('Select GradeLens settings backup');
+    await picker.setInputFiles(files('bad json'));
+    await popup.getByText('This file is not valid JSON.', { exact: false }).waitFor();
+    assert.deepEqual(await currentStorage(), changed);
+    await picker.setInputFiles(files(backupText));
+    await popup.getByText(/Replace subject method settings/).waitFor();
+    assert.deepEqual(await currentStorage(), changed);
+    if (process.env.MBGC_AUDIT_SCREENSHOTS) await popup.screenshot({ path: path.join(process.env.MBGC_AUDIT_SCREENSHOTS, 'restore-preview.png'), fullPage: true });
+    await popup.getByRole('button', { name: 'Cancel restore' }).click();
+    assert.deepEqual(await currentStorage(), changed);
+
+    await picker.setInputFiles(files(JSON.stringify({ ...backup, student: { ...backup.student, scale: [[-1, 'A']] } })));
+    await popup.getByText(/Invalid letter boundaries/).waitFor();
+    assert.deepEqual(await currentStorage(), changed);
+    await picker.setInputFiles(files(backupText));
+    await popup.getByRole('button', { name: 'Confirm restore' }).waitFor();
+    await worker.evaluate(async (key) => {
+      const prefs = (await chrome.storage.local.get(key))[key];
+      await chrome.storage.local.set({ [key]: { ...prefs, density: 'compact' } });
+    }, prefsKey);
+    await popup.getByRole('button', { name: 'Confirm restore' }).click();
+    await popup.getByText(/Settings or the active student changed/).waitFor();
+    assert.equal((await currentStorage())[prefsKey].density, 'compact');
+
+    await picker.setInputFiles(files(backupText));
+    await popup.getByRole('button', { name: 'Confirm restore' }).click();
+    await popup.getByText(/Settings restored/).waitFor();
+    assert.deepEqual((await currentStorage())[prefsKey].subjectMethods, { 123: 'absolute' });
+    await page.getByRole('tab', { name: 'Saved Plans' }).click();
+    await page.getByRole('button', { name: 'Open plan Exported goal' }).waitFor();
+    await page.getByRole('tab', { name: 'Try a Grade' }).click();
+    if (!await page.locator('.mbgc-scenario').isVisible()) await page.getByText(/Saved predictions/).first().click();
+    await page.locator('.mbgc-scenario').first().waitFor();
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    await page.locator('.mbgc-settings > summary').click();
+    await page.getByText('Export & Backup', { exact: true }).click();
+    const fromDashboard = JSON.parse(await download(page, 'Export Grades as JSON', path.join(folder, 'dashboard.json')));
+    assert.equal(fromDashboard.subjects.find((item) => item.classId === '123').selectedMethod, 'absolute');
+    await context.close();
+
+    worker = await open(profile);
+    page = await context.newPage();
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact').getByText('72.31%').waitFor();
+    popup = await popupFor(worker);
+    await popup.getByRole('switch', { name: 'Show all three calculation methods' }).and(popup.locator(':checked')).waitFor();
+    await popup.getByText('Compare methods', { exact: true }).click();
+    await popup.getByLabel('Comparison subject').selectOption('123');
+    await popup.locator('.gl-comparison-method[data-selected]').getByText('72.31% · B').waitFor();
+
+    if (isolate) {
+      await context.close();
+      worker = await open(path.join(folder, 'cross-browser'), isolate);
+      page = await context.newPage();
+      await page.goto(host + tasksPath);
+      await page.locator('.mbgc-compact').getByText('74.50%').waitFor();
+      popup = await popupFor(worker);
+      await popup.getByText('Export & Backup', { exact: true }).click();
+      await popup.getByLabel('Select GradeLens settings backup').setInputFiles(files(backupText));
+      await popup.getByRole('button', { name: 'Confirm restore' }).click();
+      await popup.getByText(/Settings restored/).waitFor();
+      await page.locator('.mbgc-compact').getByText('72.31%').waitFor();
+      assert.equal((await currentStorage())[extra[2]][0].name, 'Exported goal');
+    }
+  } finally {
+    await context?.close();
+    await fs.rm(folder, { recursive: true, force: true });
+  }
+});

@@ -6,10 +6,15 @@
   <title>GradeLens — for ManageBac</title>
   <link rel="stylesheet" href="src/ui/tokens.css">
   <link rel="stylesheet" href="src/ui/popup.css">
+  <link rel="stylesheet" href="src/ui/grade-tools.css">
   <script defer src="src/core/grades.js"></script>
   <script defer src="src/core/cache.js"></script>
+  <script defer src="src/core/goal-planner.js"></script>
+  <script defer src="src/core/grade-report.js"></script>
+  <script defer src="src/core/settings-backup.js"></script>
   <script defer src="src/ui/theme.js"></script>
   <script defer src="src/ui/icons.js"></script>
+  <script defer src="src/ui/grade-tools.js"></script>
   <script defer src="src/ui/popup.js"></script>
 </head>
 <body class="mbgc-popup">
@@ -29,8 +34,17 @@
       <h2 id="methods-heading">Calculation methods</h2>
       <label class="stack">Global default <select id="method" data-setting="method" aria-label="Global default"></select></label>
       <div id="subjects"></div>
+      <label>Show all three calculation methods <input type="checkbox" role="switch" data-setting="compareMethods"></label>
       <p class="hint">Hidden assessments can affect official grades.</p>
     </section>
+    <details id="compare-panel" hidden>
+      <summary>Compare methods</summary>
+      <div class="preference-fields">
+        <label class="stack">Comparison subject <select id="compare-subject"></select></label>
+        <label class="stack">Comparison term <select id="compare-term"></select></label>
+        <div id="compare-results" aria-live="polite"></div>
+      </div>
+    </details>
     <details class="preferences">
       <summary>Visibility</summary>
       <div class="preference-fields">
@@ -53,6 +67,7 @@
       <label>Grade progress bars <input type="checkbox" role="switch" data-setting="progressBars"></label>
       </div>
     </details>
+    <div id="transfer-settings"></div>
     <p id="feedback" class="status" role="status"></p>
   </main>
   <footer><p>Created by Sohan Tripathy</p><p>Inspired by Savir Bhaiya</p></footer>
