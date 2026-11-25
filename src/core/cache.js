@@ -1,8 +1,38 @@
 (() => {
   const app = globalThis.MBGC;
   const settingsDefaults = {
-    method: 'percentage', refreshMinutes: 5, density: 'comfortable', progressBars: true, motion: 'full', welcomeSeen: false
+    enabled: true, appearance: 'native', method: 'percentage', subjectMethods: {},
+    showGrades: true, showEstimator: true, showBadges: true, showOverview: true, showTasks: true, refreshMinutes: 5, density: 'comfortable', progressBars: true, motion: 'full', welcomeSeen: false
   };
+  const preferencesKey = 'mbgc:preferences';
+  const methodValid = (method) => typeof method === 'string' && Object.hasOwn(app.methods, method);
+  const classIdValid = (id) => typeof id === 'string' && /^\d+$/.test(id);
+  const methodFor = (settings, id) => {
+    const selected = classIdValid(id) && settings.subjectMethods?.[id];
+    return methodValid(selected) ? selected : methodValid(settings.method) ? settings.method : 'percentage';
+  };
+  const normalizeSettings = (stored) => ({ ...settingsDefaults, ...stored,
+    method: methodFor(stored ?? {}),
+    subjectMethods: Object.fromEntries(Object.entries(stored?.subjectMethods ?? {}).filter(([id, method]) =>
+      classIdValid(id) && methodValid(method))) });
+  function patchSettings(stored, { patch, subject }) {
+    const next = normalizeSettings(stored);
+    if (subject) {
+      const { id, method } = subject;
+      if (!classIdValid(id) || (method !== '' && !methodValid(method))) throw new Error('Invalid subject method.');
+      if (method) next.subjectMethods[id] = method;
+      else delete next.subjectMethods[id];
+    }
+    for (const [key, value] of Object.entries(patch ?? {})) {
+      if (!Object.hasOwn(settingsDefaults, key) || key === 'subjectMethods') continue;
+      const allowed = { appearance: ['native', 'system', 'light', 'dark'], density: ['comfortable', 'compact'],
+        motion: ['full', 'reduced', 'off'] }[key];
+      if (key === 'method' ? methodValid(value) : allowed ? allowed.includes(value) :
+        typeof settingsDefaults[key] === 'boolean' ? typeof value === 'boolean' :
+          key === 'refreshMinutes' && Number.isFinite(value) && value >= 0 && value <= 120) next[key] = value;
+    }
+    return next;
+  }
   const freshCache = () => ({ classes: {}, sources: [], sourceChecks: {}, lastSync: null, revision: 0, clearedAt: 0 });
   const currentTerms = 'current';
   const termKey = (id) => id ? 'term:' + id : 'unknown';
@@ -158,5 +188,5 @@
     }
   }
 
-  Object.assign(app, { settingsDefaults, freshCache, mergeScan, mergeCheck, currentTerms, classTermKey });
+  Object.assign(app, { settingsDefaults, preferencesKey, methodFor, normalizeSettings, patchSettings, freshCache, mergeScan, mergeCheck, currentTerms, classTermKey });
 })();

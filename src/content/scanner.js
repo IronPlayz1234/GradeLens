@@ -613,5 +613,6 @@
     };
   }
 
-  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, selfProfile, profileEmail, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks, taskDestination });
+  const discoverClasses = (doc, href) => discover(doc, new URL(href), null).classes;
+  Object.assign(app, { discoverClasses, selectors, clean, numeric, localURL, route, pageTerm, account, accountEvidence, accountLinks, selfProfile, profileEmail, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks, taskDestination });
 })();

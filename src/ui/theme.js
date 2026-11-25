@@ -33,28 +33,37 @@
   const mix = (a, b, ratio) => a.map((value, i) => Math.round(value + (b[i] - value) * ratio));
   const css = (rgb) => `rgb(${rgb.join(' ')})`;
 
-  function getTheme(anchor) {
+  function getTheme(anchor, preference = 'native') {
     const body = document.body;
     const root = document.documentElement;
     const main = document.querySelector('main, [role="main"], #main-content');
-    const styles = [main, anchor, body, root].filter(Boolean).map((node) => getComputedStyle(node));
+    const styles = [anchor, main, body, root].filter(Boolean).map((node) => getComputedStyle(node));
     const declared = [main, body, root].filter(Boolean).flatMap((node) => [
-      node.dataset.theme, node.dataset.bsTheme, node.dataset.colorScheme, node.className
+      node.dataset.theme, node.dataset.bsTheme, node.dataset.mbrMode, node.dataset.colorScheme, node.className
     ]).join(' ');
     const background = [main, body, root].filter(Boolean).map((node) =>
       color(getComputedStyle(node).backgroundColor)).find(Boolean);
-    const mode = /\b(?:dark|theme-dark|dark-mode)\b/i.test(declared) ? 'dark' :
+    const nativeMode = /\b(?:dark|theme-dark|dark-mode)\b/i.test(declared) ? 'dark' :
       /\b(?:light|theme-light|light-mode)\b/i.test(declared) ? 'light' :
         background ? (luminance(background) < .28 ? 'dark' : 'light') : scheme.matches ? 'dark' : 'light';
+    const mode = preference === 'dark' || preference === 'light' ? preference :
+      preference === 'system' ? (scheme.matches ? 'dark' : 'light') : nativeMode;
     const dark = mode === 'dark';
-    const fallback = dark ? [180, 158, 255] : [112, 76, 209];
+    const namedAccents = { blue: [41, 105, 201], orange: [184, 77, 17], red: [173, 50, 63],
+      plum: [112, 76, 156], teal: [0, 125, 119] };
+    const themeName = [anchor, main, body, root].filter(Boolean).flatMap((node) =>
+      [node.dataset.theme, node.dataset.colorScheme, ...node.classList]).map((value) =>
+      value?.match(/^(?:theme[-_])?(blue|orange|red|plum|teal)(?:[-_]theme)?$/i)?.[1]?.toLowerCase()).find(Boolean);
+    const fallback = namedAccents[themeName] ?? (dark ? [180, 158, 255] : [112, 76, 209]);
     const candidates = styles.flatMap((style) => [
-      '--managebac-primary', '--theme-primary', '--primary-color', '--accent-color', '--bs-primary', '--primary', '--accent'
+      '--managebac-primary', '--theme-primary', '--primary-accent', '--primary-color', '--accent-color', '--bs-primary', '--primary', '--accent'
     ].map((name) => style.getPropertyValue(name).trim())).filter(Boolean);
     if (anchor) {
       const nav = anchor.closest('nav, aside, [role="navigation"]') ?? anchor.parentElement;
-      const active = nav?.querySelector('a[aria-current="page"]:not(.mbgc-nav), a.active:not(.mbgc-nav)');
+      const active = nav?.querySelector('a[aria-current="page"]:not(.mbgc-nav), a.active:not(.mbgc-nav), li.active > a:not(.mbgc-nav)');
       if (active) candidates.push(getComputedStyle(active).color, getComputedStyle(active).backgroundColor);
+      const nativeIcon = anchor.querySelector('svg, i');
+      if (nativeIcon) candidates.push(getComputedStyle(nativeIcon).color);
     }
     const accent = candidates.map(color).find((rgb) => rgb && Math.max(...rgb) - Math.min(...rgb) > 24) ?? fallback;
     const surfaces = dark ? [27, 25, 36] : [253, 252, 255];
@@ -71,7 +80,7 @@
   }
 
   function applyTheme(node, theme) {
-    node.dataset.theme = theme.mode;
+    if (node.dataset.theme !== theme.mode) node.dataset.theme = theme.mode;
     node.style.setProperty('--mbgc-accent', theme.accent);
     node.style.setProperty('--mbgc-ink', theme.ink);
     node.style.setProperty('--mbgc-surface', theme.surface);

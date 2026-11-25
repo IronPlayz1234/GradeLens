@@ -2,7 +2,7 @@
   const app = globalThis.MBGC ??= {};
   const methods = {
     percentage: { label: 'Percentage Weights', explanation: 'Averages task percentages within each category, then applies category weights.' },
-    points: { label: 'Points-Based Averaging', explanation: 'Pools earned and possible points within each category, then applies category weights.' },
+    points: { label: 'Percentage Weights with Points-Based Averaging', explanation: 'Pools earned and possible points within each category, then applies category weights.' },
     absolute: { label: 'Absolute Weights', explanation: 'Applies the category weight to each graded task individually.' }
   };
   const defaultScale = [[90, 'A*'], [80, 'A'], [70, 'B'], [60, 'C'], [50, 'D'], [40, 'E'], [0, 'U']];

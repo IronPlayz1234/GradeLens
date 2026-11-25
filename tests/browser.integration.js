@@ -6,6 +6,7 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 
 const root = process.env.MBGC_EXTENSION_ROOT || path.resolve(__dirname, '..');
+const extensionName = JSON.parse(require('node:fs').readFileSync(path.join(root, 'manifest.json'), 'utf8')).name;
 const browserPath = process.env.MBGC_BROWSER_PATH;
 const host = 'https://uia.managebac.com';
 const tasksPath = '/student/classes/123/core_tasks';
@@ -17,7 +18,7 @@ async function extensionWorld(context, page) {
   const worlds = [];
   protocol.on('Runtime.executionContextCreated', ({ context: world }) => worlds.push(world));
   await protocol.send('Runtime.enable');
-  const isolated = worlds.find((world) => world.name === 'ManageBac Grade Calculator');
+  const isolated = worlds.find((world) => world.name === extensionName);
   assert.ok(isolated, JSON.stringify(worlds));
   return (expression, options = {}) => protocol.send('Runtime.evaluate', { contextId: isolated.id, expression, ...options });
 }
@@ -79,8 +80,15 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     await page.getByRole('link', { name: 'Overall Grades' }).click();
     await waitText('.mbgc-subject .mbgc-numeral', '76.00%');
     assert.equal(await page.locator('.mbgc-subject').count(), 2);
-    if (process.env.MBGC_DASHBOARD_SCREENSHOT) await page.screenshot({ path: process.env.MBGC_DASHBOARD_SCREENSHOT, fullPage: true });
-    await page.getByLabel('Calculation method').selectOption('points');
+    if (process.env.MBGC_DASHBOARD_SCREENSHOT) {
+      await page.getByRole('button', { name: 'Skip guide' }).click();
+      const subject = page.locator('.mbgc-subject summary').first();
+      await subject.click();
+      await page.locator('.mbgc-category-metrics').first().waitFor();
+      await page.screenshot({ path: process.env.MBGC_DASHBOARD_SCREENSHOT, fullPage: true, animations: 'disabled' });
+      await subject.click();
+    }
+    await page.getByLabel('Global calculation method', { exact: true }).selectOption('points');
     await waitText('.mbgc-subject .mbgc-numeral', '72.25%');
     assert.equal(await page.locator('.mbgc-subject:first-child .mbgc-numeral').count(), 1);
 
@@ -90,7 +98,7 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     await second.waitForFunction(() => document.querySelector('.mbgc-compact .mbgc-numeral')?.textContent === '72.25%');
     assert.equal(await second.locator('#latest-activity').evaluate((node) => node.previousElementSibling.classList.contains('mbgc-card-host')), true);
     await page.bringToFront();
-    await page.getByLabel('Calculation method').selectOption('absolute');
+    await page.getByLabel('Global calculation method', { exact: true }).selectOption('absolute');
     await second.waitForFunction(() => document.querySelector('.mbgc-compact .mbgc-numeral')?.textContent === '72.31%');
     await page.getByRole('link', { name: 'Grade Estimator' }).click();
     await waitText('.mbgc-actual .mbgc-numeral', '72.31%');
@@ -103,7 +111,7 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     await page.getByRole('button', { name: 'Try a future grade' }).click();
     await page.getByText('What score do I need?', { exact: true }).click();
     const before = await result.textContent();
-    if (process.env.MBGC_ESTIMATOR_SCREENSHOT) await page.screenshot({ path: process.env.MBGC_ESTIMATOR_SCREENSHOT, fullPage: true });
+    if (process.env.MBGC_ESTIMATOR_SCREENSHOT) await page.screenshot({ path: process.env.MBGC_ESTIMATOR_SCREENSHOT, fullPage: true, animations: 'disabled' });
     const slider = page.getByRole('slider');
     await slider.focus();
     await page.keyboard.press('Home');
@@ -487,7 +495,7 @@ test('mixed subjects sync from the roster and distinguish no grade from a genuin
     await tab.getByRole('link', { name: 'Overall Grades' }).click();
     const row = (name) => tab.locator('.mbgc-subject').filter({ has: tab.getByRole('heading', { name, exact: true }) });
     for (const method of ['percentage', 'points', 'absolute']) {
-      await tab.getByLabel('Calculation method').selectOption(method);
+      await tab.getByLabel('Global calculation method', { exact: true }).selectOption(method);
       for (const { name, grades } of subjects) {
         const expected = grades[method] === null ? 'No grade available' : grades[method].toFixed(2) + '%';
         await row(name).locator('.mbgc-numeral', { hasText: expected }).waitFor();
@@ -501,7 +509,7 @@ test('mixed subjects sync from the roster and distinguish no grade from a genuin
     await tab.goto(host + tasksPath(art));
     await tab.locator('.mbgc-compact').getByText('No grade available', { exact: true }).waitFor();
     await tab.getByRole('link', { name: 'Grade Estimator' }).click();
-    await tab.getByLabel('Subject').selectOption(art.id);
+    await tab.getByLabel('Subject', { exact: true }).selectOption(art.id);
     await tab.locator('.mbgc-actual').getByText('No grade available', { exact: true }).waitFor();
   } finally {
     await context.close();
@@ -592,7 +600,7 @@ test('render-only and linked results sync automatically and verified grades surv
     });
     assert.equal(idle, 0, 'an idle dashboard must not repeatedly mutate the native container');
     await tab.getByRole('link', { name: 'Grade Estimator' }).click();
-    await tab.getByLabel('Subject').selectOption('512');
+    await tab.getByLabel('Subject', { exact: true }).selectOption('512');
     await tab.locator('.mbgc-actual .mbgc-numeral', { hasText: '84.00%' }).waitFor();
     await tab.goto(host + '/student/classes/512');
     await tab.locator('.mbgc-compact .mbgc-numeral', { hasText: '84.00%' }).waitFor();
@@ -741,7 +749,7 @@ test('cold sync shows real milestones and Retry while warm sync retains grades a
     await tab.getByRole('link', { name: 'Overall Grades' }).click();
     await tab.getByText('50.00%', { exact: true }).waitFor();
     assert.equal(await tab.locator('.mbgc-loading').count(), 0);
-    await tab.getByLabel('Calculation method').selectOption('points');
+    await tab.getByLabel('Global calculation method', { exact: true }).selectOption('points');
     await tab.getByRole('img', { name: 'Calculated grade A' }).waitFor();
     await tab.getByText('82.73%', { exact: true }).waitFor();
     assert.equal(await badge.count(), 1);
@@ -794,7 +802,7 @@ test('assessment search, appearance and welcome work together', { timeout: 38000
     let tab = await context.newPage();
     await tab.goto(host + tasksPath);
     await tab.getByRole('link', { name: 'Overall Grades' }).click();
-    const welcome = 'Welcome to your grades! 🎓';
+    const welcome = 'Welcome to GradeLens';
     await tab.getByRole('region', { name: welcome }).waitFor();
     await tab.getByRole('button', { name: 'Skip guide' }).focus();
     await tab.keyboard.press('Escape');
@@ -833,7 +841,7 @@ test('assessment search, appearance and welcome work together', { timeout: 38000
     assert.ok(await subject.locator('summary').evaluate((node) => node.offsetHeight) < height);
     await tab.getByLabel('Show grade progress bars').uncheck();
     await tab.locator('.mbgc-stage[data-progress-bars="false"]').waitFor();
-    assert.equal(await subject.locator('.mbgc-subject-grade .mbgc-track').isVisible(), false);
+    assert.equal(await subject.locator('.mbgc-row-method .mbgc-track').isVisible(), false);
     await tab.getByLabel('Animation intensity').selectOption('reduced');
     await tab.locator('.mbgc-stage[data-motion="reduced"]').waitFor();
     assert.equal(await subject.locator('summary').evaluate((node) => getComputedStyle(node.closest('.mbgc-subject')).transitionDuration), '0.07s');
@@ -857,7 +865,7 @@ test('assessment search, appearance and welcome work together', { timeout: 38000
     assert.equal(await tab.getByRole('region', { name: welcome }).count(), 0);
     await context.serviceWorkers()[0].evaluate(() => chrome.storage.local.set({ 'mbgc:preferences': { method: 'absolute' } }));
     await tab.reload();
-    await tab.getByLabel('Calculation method').waitFor();
+    await tab.getByLabel('Global calculation method', { exact: true }).waitFor();
     assert.equal(await tab.getByRole('region', { name: welcome }).count(), 0);
     const migrated = await context.serviceWorkers()[0].evaluate(async () =>
       (await chrome.storage.local.get('mbgc:preferences'))['mbgc:preferences']);
@@ -865,6 +873,225 @@ test('assessment search, appearance and welcome work together', { timeout: 38000
     assert.equal(migrated.method, 'absolute');
   } finally {
     await context?.close();
+    await fs.rm(profile, { recursive: true, force: true });
+  }
+});
+
+test('toolbar preferences, independent subject methods, all grade views and restart', { timeout: 55000 }, async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-methods-'));
+  const tasks = await fixture('class-tasks');
+  const overview = tasks.replace(/<section data-all-tasks>[\s\S]*?<\/section>/, '<section><h2>Latest Activity</h2></section>');
+  const physics = tasks.replaceAll('/classes/123', '/classes/456')
+    .replaceAll('Mathematics Higher Level, Statistics and Mathematical Investigation', 'Physics')
+    .replace('8 / 10 pts', '9 / 10 pts');
+  const menu = '<nav aria-label="Workspace"><ul><li class="active"><a aria-current="page" href="/student/tasks_and_deadlines" style="background:rgb(200,200,200)">Tasks &amp; Deadlines</a></li></ul></nav>';
+  let context;
+  async function launch() {
+    context = await chromium.launchPersistentContext(profile, {
+      ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+      args: ['--disable-extensions-except=' + root, '--load-extension=' + root]
+    });
+    context.setDefaultTimeout(10000);
+    await context.route(host + '/**', (intercept) => {
+      const { pathname } = new URL(intercept.request().url());
+      const page = pathname === tasksPath ? tasks : pathname === physicsPath ? physics :
+        pathname === '/student/classes/123' ? overview :
+        pathname === '/student/settings/personalisation' ? '<main><h1>Personalisation</h1><div class="card">Theme</div></main>' : tasks;
+      const body = page.replace('<li><a href="/student/tasks_and_deadlines">', '<li class="active"><a aria-current="page" style="background:rgb(200,200,200)" href="/student/tasks_and_deadlines">');
+      return intercept.fulfill({ contentType: 'text/html', body: pathname === '/student/settings/personalisation' ? menu + body : body });
+    });
+    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+    return new URL(worker.url()).origin === 'null' ? worker.url().split('/src/')[0] : new URL(worker.url()).origin;
+  }
+  try {
+    let extension = await launch();
+    assert.equal(await context.serviceWorkers()[0].evaluate(() => chrome.runtime.getManifest().action.default_popup), 'popup.html');
+    let page = await context.newPage();
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact .mbgc-numeral').getByText('74.50%', { exact: true }).waitFor();
+    let popup = await context.newPage();
+    await popup.goto(extension + '/popup.html');
+    const mathName = /Mathematics Higher Level/;
+    const math = popup.getByLabel(mathName);
+    const phys = popup.getByLabel('Physics', { exact: true });
+    await math.selectOption('points');
+    await phys.selectOption('absolute');
+    await page.locator('.mbgc-compact').getByText(/Points-Based Averaging/).waitFor();
+    await page.locator('.mbgc-compact .mbgc-numeral').getByText('72.25%', { exact: true }).waitFor();
+    if (process.env.MBGC_POPUP_SCREENSHOT) {
+      await popup.setViewportSize({ width: 400, height: 575 });
+      await popup.screenshot({ path: process.env.MBGC_POPUP_SCREENSHOT });
+    }
+    await popup.getByText('Visibility', { exact: true }).click();
+    await popup.getByLabel('Class Tasks grade').uncheck();
+    await page.locator('.mbgc-card-host').waitFor({ state: 'detached' });
+    await popup.getByLabel('Class Tasks grade').check();
+    await page.locator('.mbgc-card-host').waitFor();
+    await popup.getByLabel('Grades beside class names').uncheck();
+    await page.locator('.mbgc-sidebar-grade').first().waitFor({ state: 'detached' });
+    await popup.getByLabel('Grades beside class names').check();
+    await page.locator('aside a[href="/student/classes/123"] .mbgc-sidebar-grade').waitFor();
+    assert.equal(await page.locator('aside a[href="/student/classes/123"] .mbgc-sidebar-grade').getAttribute('data-letter'), 'B');
+    await popup.getByLabel('Grade Estimator sidebar entry').uncheck();
+    await page.getByRole('link', { name: 'Grade Estimator' }).waitFor({ state: 'detached' });
+    await popup.getByLabel('Grade Estimator sidebar entry').check();
+    await popup.getByLabel('Overall Grades sidebar entry').uncheck();
+    await page.getByRole('link', { name: 'Overall Grades' }).waitFor({ state: 'detached' });
+    await popup.getByLabel('Overall Grades sidebar entry').check();
+
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    const mathRow = page.locator('.mbgc-subject[data-class-id="123"]');
+    const physRow = page.locator('.mbgc-subject[data-class-id="456"]');
+    await mathRow.getByText('72.25%', { exact: true }).waitFor();
+    await physRow.getByText('74.62%', { exact: true }).waitFor();
+    await page.locator('[data-mbgc-view-active] .mbgc-nav[aria-current="page"]').getByText('Overall Grades').waitFor();
+    assert.equal(await page.locator('aside a[href="/student/tasks_and_deadlines"]').evaluate((link) => getComputedStyle(link).backgroundColor), 'rgba(0, 0, 0, 0)');
+    await page.goBack();
+    await page.locator('.mbgc-stage').waitFor({ state: 'detached' });
+    assert.equal(await page.locator('aside a[href="/student/tasks_and_deadlines"]').evaluate((link) => getComputedStyle(link).backgroundColor), 'rgb(200, 200, 200)');
+    await page.goForward();
+    await mathRow.waitFor();
+    await page.locator('aside nav').evaluate((nav) => {
+      const replacement = nav.cloneNode(true);
+      for (const owned of replacement.querySelectorAll('.mbgc-owned')) owned.remove();
+      nav.replaceWith(replacement);
+    });
+    await page.getByRole('link', { name: 'Overall Grades' }).waitFor();
+    assert.equal(await page.getByRole('link', { name: 'Overall Grades' }).count(), 1);
+    await page.evaluate(() => document.documentElement.style.setProperty('--primary-color', '#b64911'));
+    await page.waitForFunction(() => document.querySelector('#mbgc-stage-host')?.style.getPropertyValue('--mbgc-accent') === 'rgb(182 73 17)');
+
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    await page.locator('.mbgc-actual').getByText('72.25%', { exact: true }).waitFor();
+    await page.getByLabel('Subject', { exact: true }).selectOption('456');
+    await page.locator('.mbgc-actual').getByText('74.62%', { exact: true }).waitFor();
+    assert.equal(await page.getByLabel('Subject calculation method').inputValue(), 'absolute');
+    await page.getByLabel('Subject calculation method').selectOption('');
+    await page.locator('.mbgc-actual').getByText('76.00%', { exact: true }).waitFor();
+    await popup.getByLabel('Global default', { exact: true }).selectOption('absolute');
+    await page.locator('.mbgc-actual').getByText('74.62%', { exact: true }).waitFor();
+    assert.equal(await popup.getByLabel(mathName).inputValue(), 'points');
+    await popup.getByLabel('Global default', { exact: true }).selectOption('percentage');
+    await page.locator('.mbgc-actual').getByText('76.00%', { exact: true }).waitFor();
+    await popup.getByLabel('Physics', { exact: true }).selectOption('absolute');
+    await page.locator('.mbgc-actual').getByText('74.62%', { exact: true }).waitFor();
+
+    const other = await context.newPage();
+    await other.goto(host + '/student/classes/123');
+    await other.locator('.mbgc-compact .mbgc-numeral').getByText('72.25%', { exact: true }).waitFor();
+    await popup.getByLabel('Class Overview grade').uncheck();
+    await other.locator('.mbgc-card-host').waitFor({ state: 'detached' });
+    await popup.getByLabel('Class Overview grade').check();
+    await other.locator('.mbgc-card-host').waitFor();
+    await other.goto(host + '/student/settings/personalisation');
+    const appearance = other.locator('.mbgc-personalisation').getByLabel('Appearance');
+    await appearance.selectOption('dark');
+    await page.locator('html[data-mbgc-native-dark]').waitFor();
+    assert.equal(await popup.getByLabel('Color mode').inputValue(), 'dark');
+    await popup.getByRole('switch', { name: 'Enabled', exact: true }).uncheck();
+    await page.locator('#mbgc-stage-host').waitFor({ state: 'detached' });
+    await other.locator('.mbgc-personalisation').waitFor({ state: 'detached' });
+    assert.equal(await other.locator('html').getAttribute('data-mbgc-native-dark'), null);
+    await popup.getByRole('switch', { name: 'Enabled', exact: true }).check();
+    await other.locator('.mbgc-personalisation').waitFor();
+    await appearance.selectOption('native');
+    await other.locator('html[data-mbgc-native-dark]').waitFor({ state: 'detached' });
+    await other.close();
+    await context.close();
+
+    extension = await launch();
+    page = await context.newPage();
+    await page.goto(host + tasksPath);
+    await page.locator('.mbgc-compact .mbgc-numeral').getByText('72.25%', { exact: true }).waitFor();
+    popup = await context.newPage();
+    await popup.goto(extension + '/popup.html');
+    await popup.getByLabel(mathName).waitFor();
+    assert.equal(await popup.getByLabel(mathName).inputValue(), 'points');
+    assert.equal(await popup.getByLabel('Physics', { exact: true }).inputValue(), 'absolute');
+    await popup.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.locator('.mbgc-settings[open]').waitFor();
+  } finally {
+    await context?.close();
+    await fs.rm(profile, { recursive: true, force: true });
+  }
+});
+
+test('GradeLens visual layout, outline navigation icons, browser zoom and accent themes', { timeout: 30000 }, async () => {
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-visual-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root], viewport: { width: 1240, height: 850 }
+  });
+  context.setDefaultTimeout(6000);
+  try {
+    const tasks = (await fixture('class-tasks')).replace('<ul>', `<ul>
+      <li><a href="/student">My Workspace</a></li>
+      <li><a href="/student/calendar">Calendar</a></li>
+      <li><a href="/student/timetables">Timetables</a></li>
+      <li><a href="/student/calendar/native"><svg data-native-icon viewBox="0 0 24 24"><path d="M1 1h4"/></svg>Calendar</a></li>`)
+      .replace('</head>', '<style>aside a svg, aside a svg * { fill: red; stroke: none; } aside a svg { width: 32px; }</style></head>');
+    const physics = tasks.replaceAll('/classes/123', '/classes/456')
+      .replaceAll('Mathematics Higher Level, Statistics and Mathematical Investigation', 'Physics');
+    await context.route(host + '/**', (route) => route.fulfill({ contentType: 'text/html',
+      body: new URL(route.request().url()).pathname === physicsPath ? physics : tasks }));
+    const page = await context.newPage();
+    await page.goto(host + tasksPath);
+    const icons = { workspace: 'rect', calendar: 'rect', timetable: 'circle', tasks: 'path', grades: 'line', estimator: 'line' };
+    for (const [name, shape] of Object.entries(icons)) {
+      const icon = page.locator('aside svg[data-mbgc-icon="' + name + '"]');
+      await icon.waitFor();
+      assert.equal(await icon.count(), 1);
+      const visual = await icon.locator(shape).first().evaluate((node) => {
+        const styles = getComputedStyle(node);
+        return { fill: styles.fill, stroke: styles.stroke, width: node.ownerSVGElement.getBoundingClientRect().width };
+      });
+      assert.equal(visual.fill, 'none');
+      assert.notEqual(visual.stroke, 'none');
+      assert.equal(visual.width, 18);
+    }
+    assert.equal(await page.locator('a:has([data-native-icon]) .mbgc-glyph').count(), 0);
+    await page.locator('a:has([data-native-icon])').evaluate((link) => link.closest('li').remove());
+    await page.addStyleTag({ content: 'aside a { font-size: 0; }' });
+    for (const name of Object.keys(icons)) assert.equal(
+      (await page.locator('aside svg[data-mbgc-icon="' + name + '"]').boundingBox())?.width, 18);
+    await page.evaluate(() => [...document.querySelectorAll('style')].find((style) => style.textContent === 'aside a { font-size: 0; }')?.remove());
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    await page.locator('.mbgc-subject').first().waitFor();
+    await page.waitForFunction(() => document.querySelector('#mbgc-stage-host')?.shadowRoot?.querySelector('.mbgc-wordmark-icon')?.naturalWidth === 48);
+    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+    for (const zoom of [0.8, 1, 1.25, 1.5]) {
+      await worker.evaluate(async ({ path, zoom }) => {
+        const tabs = await chrome.tabs.query({ url: 'https://uia.managebac.com/student/*' });
+        const tab = tabs.find((item) => item.url.includes(path + '#mbgc-overall-grades'));
+        await chrome.tabs.setZoom(tab.id, zoom);
+        if (await chrome.tabs.getZoom(tab.id) !== zoom) throw new Error('Zoom was not applied');
+      }, { path: tasksPath, zoom });
+      assert.ok(await page.locator('.mbgc-page').evaluate((node) => node.scrollWidth <= node.clientWidth + 1));
+    }
+    await worker.evaluate(async () => {
+      const [tab] = await chrome.tabs.query({ url: 'https://uia.managebac.com/student/*' });
+      await chrome.tabs.setZoom(tab.id, 1);
+    });
+    for (const [theme, accent] of Object.entries({ blue: '41 105 201', orange: '184 77 17', red: '173 50 63', plum: '112 76 156', teal: '0 125 119' })) {
+      await page.evaluate((theme) => {
+        document.documentElement.style.removeProperty('--primary-color');
+        document.body.dataset.theme = theme;
+      }, theme);
+      await page.waitForFunction((accent) => document.querySelector('#mbgc-stage-host')?.style.getPropertyValue('--mbgc-accent') === 'rgb(' + accent + ')', accent);
+    }
+    await page.getByText('Last updated', { exact: false }).first().waitFor();
+    await page.getByRole('button', { name: 'Skip guide' }).click();
+    await page.getByRole('region', { name: 'Welcome to GradeLens' }).waitFor({ state: 'detached' });
+    await page.setViewportSize({ width: 390, height: 760 });
+    await page.locator('.mbgc-subject summary').first().click();
+    await page.locator('.mbgc-category-metrics').first().waitFor();
+    assert.ok(await page.locator('.mbgc-page').evaluate((node) => node.scrollWidth <= node.clientWidth + 1));
+    if (process.env.MBGC_MOBILE_SCREENSHOT) await page.screenshot({ path: process.env.MBGC_MOBILE_SCREENSHOT, fullPage: true, animations: 'disabled' });
+    await page.getByRole('link', { name: 'Grade Estimator' }).click();
+    await page.locator('.mbgc-prediction-comparison').waitFor();
+    assert.ok(await page.locator('.mbgc-page').evaluate((node) => node.scrollWidth <= node.clientWidth + 1));
+  } finally {
+    await context.close();
     await fs.rm(profile, { recursive: true, force: true });
   }
 });

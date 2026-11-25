@@ -1,0 +1,12 @@
+/* Shared GradeLens typography and rhythm for in-page surfaces and toolbar. */
+.mbgc-owned, .mbgc-popup {
+  --gl-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --gl-space-1: 4px;
+  --gl-space-2: 8px;
+  --gl-space-3: 12px;
+  --gl-space-4: 16px;
+  --gl-space-5: 24px;
+  --gl-radius-control: 7px;
+  --gl-radius-surface: 12px;
+  --gl-fast: 140ms ease;
+}

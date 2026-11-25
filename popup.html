@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GradeLens — for ManageBac</title>
+  <link rel="stylesheet" href="src/ui/tokens.css">
+  <link rel="stylesheet" href="src/ui/popup.css">
+  <script defer src="src/core/grades.js"></script>
+  <script defer src="src/core/cache.js"></script>
+  <script defer src="src/ui/icons.js"></script>
+  <script defer src="src/ui/popup.js"></script>
+</head>
+<body class="mbgc-popup">
+  <header>
+    <img src="assets/icons/gradelens-48.png" alt="" width="36" height="36">
+    <div><h1>GradeLens</h1><p>for ManageBac <span id="version"></span></p></div>
+    <label class="master"><input id="enabled" data-setting="enabled" type="checkbox" role="switch"> Enabled</label>
+  </header>
+  <main>
+    <nav aria-label="Quick actions">
+      <button data-open="grades" type="button">Overall Grades</button>
+      <button data-open="estimator" type="button">Grade Estimator</button>
+      <button data-open="settings" type="button">Settings</button>
+    </nav>
+    <p id="sync" class="status" role="status">Looking for a ManageBac tab…</p>
+    <section aria-labelledby="methods-heading">
+      <h2 id="methods-heading">Calculation methods</h2>
+      <label class="stack">Global default <select id="method" data-setting="method" aria-label="Global default"></select></label>
+      <div id="subjects"></div>
+      <p class="hint">Hidden assessments can affect official grades.</p>
+    </section>
+    <details class="preferences">
+      <summary>Visibility</summary>
+      <div class="preference-fields">
+      <label>Overall Grades sidebar entry <input type="checkbox" role="switch" data-setting="showGrades"></label>
+      <label>Grade Estimator sidebar entry <input type="checkbox" role="switch" data-setting="showEstimator"></label>
+      <label>Grades beside class names <input type="checkbox" role="switch" data-setting="showBadges"></label>
+      <label>Class Overview grade <input type="checkbox" role="switch" data-setting="showOverview"></label>
+      <label>Class Tasks grade <input type="checkbox" role="switch" data-setting="showTasks"></label>
+      </div>
+    </details>
+    <details class="preferences">
+      <summary>Appearance</summary>
+      <div class="preference-fields">
+      <label>Color mode <select data-setting="appearance">
+        <option value="native">Match ManageBac</option><option value="system">Follow system</option>
+        <option value="light">Light</option><option value="dark">Dark</option>
+      </select></label>
+      <label>Card density <select data-setting="density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
+      <label>Animation intensity <select data-setting="motion"><option value="full">Full</option><option value="reduced">Reduced</option><option value="off">Off</option></select></label>
+      <label>Grade progress bars <input type="checkbox" role="switch" data-setting="progressBars"></label>
+      </div>
+    </details>
+    <p id="feedback" class="status" role="status"></p>
+  </main>
+  <footer><p>Created by Sohan Tripathy</p><p>Inspired by Savir Bhaiya</p></footer>
+</body>
+</html>

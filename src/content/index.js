@@ -8,12 +8,15 @@
 
   async function isolateDashboard() {
     try {
-      const response = await fetch(chrome.runtime.getURL('src/ui/styles.css'));
-      if (!response.ok) return;
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(await response.text());
+      const sheets = await Promise.all(['tokens.css', 'styles.css'].map(async (name) => {
+        const response = await fetch(chrome.runtime.getURL('src/ui/' + name));
+        if (!response.ok) throw new Error('Unable to load extension styles');
+        const sheet = new CSSStyleSheet();
+        sheet.replaceSync(await response.text());
+        return sheet;
+      }));
       const shadow = stageHost.attachShadow({ mode: 'open' });
-      shadow.adoptedStyleSheets = [sheet];
+      shadow.adoptedStyleSheets = sheets;
       shadow.append(stage);
     } catch {
       // Chrome can invalidate an existing content script during extension reload.
@@ -24,6 +27,11 @@
   let fallback;
   let nativeHost;
   let nativeAnchor;
+  let navKey;
+  let activeNativeMenu;
+  let appearancePanel;
+  let wasEnabled;
+  let openSettings = false;
   let theme;
   let themeKey = '';
   let cardKey = '';
@@ -96,16 +104,18 @@
   function getWorkspaceAnchor() {
     return [...document.querySelectorAll('a[href]:not(.mbgc-nav)')].find((node) => {
       const url = app.localURL(node.getAttribute('href'), location.href);
+      const label = app.clean(node.getAttribute('aria-label') || node.getAttribute('title') || node.textContent);
       return url?.pathname.replace(/\/$/, '') === app.workspacePath &&
         (node.closest('aside, nav, [role="navigation"], .sidebar') ||
-          /^tasks\s*(?:&|and)\s*deadlines$/i.test(app.clean(node.textContent))) &&
+          /^tasks\s*(?:&|and)\s*deadlines$/i.test(label)) &&
         !url.search;
     }) ?? null;
   }
 
   function openView(hash) {
     history.pushState(history.state, '', location.pathname + location.search + hash);
-    reconcile();
+    if (lastURL !== location.href) reconcile();
+    else render(true);
   }
   function closeView() {
     history.pushState(history.state, '', location.pathname + location.search);
@@ -124,14 +134,44 @@
     return link;
   }
 
+  function updateNativeIcons(anchor) {
+    const scope = anchor?.closest('aside,.sidebar,nav,[role="navigation"]');
+    if (!scope) return;
+    for (const link of scope.querySelectorAll('a[href]:not(.mbgc-nav)')) {
+      const added = link.querySelector(':scope > .mbgc-native-glyph');
+      const native = link.querySelector('svg:not(.mbgc-native-glyph),img,i,[data-icon],[class*="icon"]:not(.mbgc-native-glyph)');
+      if (native) { added?.remove(); continue; }
+      if (added) continue;
+      const label = app.clean(link.getAttribute('aria-label') || app.clean(link.textContent) || link.title);
+      const glyph = /^my workspace$/i.test(label) ? 'workspace' : /^calendar$/i.test(label) ? 'calendar' :
+        /^timetables?$/i.test(label) ? 'timetable' : /^tasks\s*(?:&|and)\s*deadlines$/i.test(label) ? 'tasks' : null;
+      if (!glyph) continue;
+      const image = app.icon(glyph);
+      image.classList.add('mbgc-owned', 'mbgc-native-glyph');
+      link.prepend(image);
+    }
+  }
+
+  function removeNav() {
+    for (const item of nav) (item.closest('.mbgc-nav-shell') ?? item).remove();
+    fallback?.remove();
+    activeNativeMenu?.removeAttribute('data-mbgc-view-active');
+    activeNativeMenu = null;
+    nav = [];
+    navKey = undefined;
+  }
+
   function installNav() {
     const anchor = nativeAnchor?.isConnected ? nativeAnchor : getWorkspaceAnchor();
-    if (nativeAnchor === anchor && nav.length && nav.every((item) => item.isConnected)) return;
+    const key = String(sync.settings.showGrades) + ':' + String(sync.settings.showEstimator);
+    if (nativeAnchor === anchor && navKey === key && nav.every((item) => item.isConnected)) return;
     for (const item of nav) (item.closest('.mbgc-nav-shell') ?? item).remove();
     fallback?.remove();
     nativeAnchor = anchor;
-    nav = [navLink('Overall Grades', '#mbgc-overall-grades', 'grades'),
-      navLink('Grade Estimator', '#mbgc-grade-estimator', 'estimator')];
+    navKey = key;
+    nav = [];
+    if (sync.settings.showGrades) nav.push(navLink('Overall Grades', '#mbgc-overall-grades', 'grades'));
+    if (sync.settings.showEstimator) nav.push(navLink('Grade Estimator', '#mbgc-grade-estimator', 'estimator'));
     if (anchor) {
       if (anchor.className && typeof anchor.className === 'string') nav.forEach((item) => {
         const nativeClasses = [...anchor.classList].filter((name) => !/active|selected|current/i.test(name));
@@ -144,12 +184,13 @@
         anchor.after(...nav);
       }
     } else {
-      const main = knownMain();
-      if (main) {
+      const main = knownMain() ?? document.body.firstElementChild;
+      if (main && nav.length) {
         fallback = app.h('div', 'mbgc-owned mbgc-fallback-nav', nav);
         main.before(fallback);
       }
     }
+    if (nav.some((item) => !item.isConnected)) navKey = undefined;
     themeKey = '';
   }
 
@@ -161,7 +202,7 @@
       const route = url && app.route(url);
       const enrolledLink = (route?.type === 'overview' || route?.type === 'tasks') && link.closest(scope) &&
         (!link.closest(mainSelector) || link.closest('aside,.sidebar'));
-      const entry = enrolledLink && sync.cache.classes[route.classId];
+      const entry = sync.settings.showBadges && enrolledLink && sync.cache.classes[route.classId];
       const nativeTerm = url && app.termFromURL(url)?.id;
       const term = nativeTerm ? 'term:' + nativeTerm :
         view.term && view.term !== app.currentTerms && view.term !== 'unknown' ? view.term : app.classTermKey(entry);
@@ -219,7 +260,7 @@
 
   function updateChanges() {
     for (const [key, expiry] of changed) if (Date.now() > expiry) changed.delete(key);
-    const revision = sync.revision + ':' + sync.settings.method + ':' + JSON.stringify(sync.overrides.weights);
+    const revision = sync.revision + ':' + JSON.stringify([sync.settings.method, sync.settings.subjectMethods, sync.overrides.weights]);
     if (revision === gradeRevision) return;
     gradeRevision = revision;
     const next = new Map();
@@ -227,7 +268,7 @@
       for (const term of Object.keys(entry.terms)) {
         const item = app.gradeData(sync, classId, term);
         if (item.result.percentage !== null) {
-          next.set(classId + ':' + term, { value: item.result.percentage, method: sync.settings.method,
+          next.set(classId + ':' + term, { value: item.result.percentage, method: item.method,
             assessment: JSON.stringify(item.tasks.map((task) => [task.id, task.earnedPoints, task.maxPoints, task.category])),
             weights: JSON.stringify(item.weights) });
         }
@@ -263,14 +304,45 @@
     return replacement ?? null;
   }
 
+  function togglePersonalisation() {
+    const title = document.querySelector('main h1,[role="main"] h1,#content h1,#main-content h1,.main-content h1');
+    if (!/^(?:personalisation|personalization)$/i.test(app.clean(title?.textContent))) { appearancePanel?.remove(); return; }
+    if (!title || !title.closest('main,[role="main"],#content,#main-content,.main-content')) {
+      appearancePanel?.remove();
+      return;
+    }
+    if (!appearancePanel) {
+      appearancePanel = app.h('section', 'mbgc-owned mbgc-compact mbgc-personalisation',
+        app.h('h2', '', 'GradeLens appearance'), app.appearanceField(sync));
+    }
+    appearancePanel.querySelector('select').value = sync.settings.appearance;
+    if (!appearancePanel.isConnected) title.after(appearancePanel);
+    if (theme) app.applyTheme(appearancePanel, theme);
+  }
+
+  function configureNativeAppearance() {
+    const root = document.documentElement;
+    const preference = sync.settings.appearance;
+    const useDark = preference === 'dark' || (preference === 'system' && app.scheme.matches);
+    // ManageBac Reimagined owns native appearance while its theme is active.
+    root.toggleAttribute('data-mbgc-native-dark', useDark && !root.hasAttribute('data-mbr-mode'));
+  }
+
   function render(force = false) {
-    if (!app.studentPath(location.pathname)) {
+    const enabled = sync.settings.enabled && app.studentPath(location.pathname);
+    if (!enabled) {
       unmountDashboard();
       card.remove();
       for (const badge of document.querySelectorAll('.mbgc-sidebar-grade')) badge.remove();
-      for (const item of nav) (item.closest('.mbgc-nav-shell') ?? item).remove();
+      removeNav();
+      appearancePanel?.remove();
+      for (const icon of document.querySelectorAll('.mbgc-native-glyph')) icon.remove();
+      document.documentElement.removeAttribute('data-mbgc-native-dark');
+      wasEnabled = false;
       return;
     }
+    if (wasEnabled === false) queueScan();
+    wasEnabled = true;
     if (lastAccount !== sync.account) {
       lastAccount = sync.account;
       lastGrades = new Map();
@@ -279,13 +351,15 @@
       force = true;
     }
     installNav();
+    updateNativeIcons(nativeAnchor);
     for (const root of [stage, card]) {
       for (const key of ['density', 'motion', 'progressBars']) {
         const value = String(sync.settings[key]);
         if (root.dataset[key] !== value) root.dataset[key] = value;
       }
     }
-    const nextTheme = app.getTheme(nativeAnchor);
+    configureNativeAppearance();
+    const nextTheme = app.getTheme(nativeAnchor, sync.settings.appearance);
     const nextThemeKey = JSON.stringify(nextTheme);
     if (nextThemeKey !== themeKey) {
       theme = nextTheme;
@@ -294,6 +368,15 @@
     }
     updateChanges();
     const panel = views[location.hash];
+    const menu = panel && nativeAnchor
+      ? nativeAnchor.closest('aside,.sidebar') ?? nativeAnchor.closest('nav,[role="navigation"]') : null;
+    if (activeNativeMenu !== menu) {
+      activeNativeMenu?.removeAttribute('data-mbgc-view-active');
+      activeNativeMenu = menu;
+      activeNativeMenu?.setAttribute('data-mbgc-view-active', '');
+    }
+    if (panel) appearancePanel?.remove();
+    else togglePersonalisation();
     nav.forEach((link) => {
       if (panel && link.hash === location.hash) {
         if (!link.hasAttribute('aria-current')) link.setAttribute('aria-current', 'page');
@@ -345,6 +428,15 @@
         }
         viewKey = contentKey;
       }
+      if (openSettings && panel === 'grades') {
+        const settings = stage.querySelector('.mbgc-settings');
+        if (settings) {
+          openSettings = false;
+          view.settings = settings.open = true;
+          settings.scrollIntoView({ block: 'nearest' });
+          settings.querySelector('summary')?.focus({ preventScroll: true });
+        }
+      }
       updateClassBadges();
       wasViewing = true;
     } else {
@@ -353,7 +445,8 @@
       viewKey = '';
       renderedView = null;
       wasViewing = false;
-      if (!current.classId || !['tasks', 'overview'].includes(current.type)) {
+      if (!current.classId || !['tasks', 'overview'].includes(current.type) ||
+        (current.type === 'tasks' ? !sync.settings.showTasks : !sync.settings.showOverview)) {
         card.remove();
         return;
       }
@@ -378,6 +471,7 @@
     }, 35);
   }
   function queueScan(rows = null) {
+    if (!sync.settings.enabled) return;
     if (rows === null) fullScan = true;
     else for (const row of rows) dirtyRows.add(row);
     clearTimeout(scanTimer);
@@ -420,10 +514,11 @@
   const relevant = [gradeRoots, app.selectors.termControls, app.selectors.weights, app.selectors.scale,
     app.discoveryLinks, app.accountLinks, 'a[href*="/core_tasks/"],a[href*="/tasks/"]', 'table,thead,h1,h2,h3,h4,[role="heading"],.h2,.h3,.h4,.title',
     '[data-task-list],[data-current-student-id],[data-current-user-id],[role="listbox"],[role="option"]'].join(',');
-  const structure = relevant + ',main,[role="main"],#content,[data-all-tasks]';
+  const structure = relevant + ',main,[role="main"],#content,[data-all-tasks],nav,aside,[role="navigation"],.sidebar';
   const scoreAttributes = new Set(['data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade']);
 
   function handleMutations(records) {
+    if (!sync.settings.enabled) return;
     if (location.href !== lastURL) { reconcile(); return; }
     const scores = new Set();
     for (const entry of records) {
@@ -432,9 +527,11 @@
       if (!target) continue;
       const children = [...entry.addedNodes, ...entry.removedNodes];
       if (entry.type === 'childList' && children.every(owns)) continue;
+      if (target.closest('nav,aside,[role="navigation"],.sidebar') &&
+          (entry.type === 'childList' || entry.attributeName === 'aria-current')) scheduleRender();
       if (entry.type === 'attributes' && (target === document.body || target === document.documentElement ||
         target.matches('main,[role="main"],nav,aside')) &&
-        /^(class|style|data-theme|data-bs-theme|data-color-scheme)$/.test(entry.attributeName)) {
+        /^(class|style|data-theme|data-bs-theme|data-color-scheme|data-mbr-mode)$/.test(entry.attributeName)) {
         scheduleRender();
         continue;
       }
@@ -460,7 +557,7 @@
   observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true,
     attributeFilter: ['data-selected-term-id', 'data-term-id', 'data-total-count', 'class', 'style', 'hidden', 'aria-hidden',
       'aria-busy', 'aria-controls', 'data-loading', 'selected', 'value', 'href', 'aria-current', 'aria-selected', 'aria-expanded', 'data-selected', 'data-semester-id', 'data-academic-term-id', 'data-term-label', 'data-value', 'data-earned-points', 'data-max-points', 'data-letter-grade', 'data-graded', 'data-grade-eligible', 'data-counts-toward-grade', 'data-assessment-type', 'data-current-student-id', 'data-current-user-id', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme'] });
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-bs-theme', 'data-color-scheme', 'data-mbr-mode'] });
   window.addEventListener('popstate', reconcile);
   window.addEventListener('hashchange', reconcile);
   window.navigation?.addEventListener('currententrychange', reconcile);
@@ -493,6 +590,24 @@
     if (location.href !== lastURL) reconcile();
     if (!document.hidden && app.studentPath(location.pathname)) sync.refresh();
   }, 15000);
+  chrome.runtime.onMessage.addListener((message, sender, respond) => {
+    if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) return;
+    if (message?.type === 'mbgc:popup-state') {
+      const discovered = Object.fromEntries(Object.entries(sync.cache.classes).map(([id, entry]) => [id, entry.name]));
+      for (const [id, name] of Object.entries(app.discoverClasses(document, location.href))) {
+        if (!discovered[id]) discovered[id] = name;
+      }
+      respond({ subjects: Object.entries(discovered), lastSync: sync.cache.lastSync, refreshing: sync.refreshing,
+        issue: sync.refreshIssue || sync.storageState === 'unavailable', menuAttached: Boolean(nativeAnchor?.isConnected), theme });
+    }
+    if (message?.type === 'mbgc:popup-open' && sync.settings.enabled &&
+      ['grades', 'estimator', 'settings'].includes(message.view)) {
+      openSettings = message.view === 'settings';
+      if (openSettings) view.settings = true;
+      openView(message.view === 'estimator' ? '#mbgc-grade-estimator' : '#mbgc-overall-grades');
+      respond({ opened: true });
+    }
+  });
   void isolateDashboard().catch(() => {});
   sync.init().catch(() => {}).finally(() => {
     render();

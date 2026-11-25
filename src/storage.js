@@ -8,7 +8,8 @@ const tabLeases = new Map();
 chrome.runtime.onInstalled.addListener(({ reason, previousVersion }) => {
   if (reason !== 'update' || !previousVersion) return;
   const key = 'mbgc:preferences';
-  void chrome.storage.local.get(key).then((result) => {
+  void enqueue(async () => {
+    const result = await chrome.storage.local.get(key);
     const preferences = result[key] ?? {};
     if (!Object.hasOwn(preferences, 'welcomeSeen')) return chrome.storage.local.set({ [key]: { ...preferences, welcomeSeen: true } });
   }).catch(() => {});
@@ -44,6 +45,19 @@ async function notify(account, originTab) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  const student = (sender.origin == null || sender.origin === origin) && sender.frameId === 0 &&
+    /^https:\/\/uia\.managebac\.com\/student(?:[/?#]|$)/.test(sender.url ?? '');
+  if (sender.id === chrome.runtime.id && message?.type === 'mbgc:preferences' &&
+    (student || sender.url === chrome.runtime.getURL('popup.html'))) {
+    enqueue(async () => {
+      const key = app.preferencesKey;
+      const stored = (await chrome.storage.local.get(key))[key];
+      const next = app.patchSettings(stored, message);
+      if (JSON.stringify(stored) !== JSON.stringify(next)) await chrome.storage.local.set({ [key]: next });
+      return next;
+    }).then((value) => respond({ value }), () => respond({ error: 'Preferences could not be saved.' }));
+    return true;
+  }
   if (sender.id !== chrome.runtime.id || (sender.origin != null && sender.origin !== origin) || sender.frameId !== 0 || !/^https:\/\/uia\.managebac\.com\/student(?:[/?#]|$)/.test(sender.url ?? '') ||
     typeof message !== 'object' || !message?.type?.startsWith('mbgc:')) return;
   const work = enqueue(async () => {

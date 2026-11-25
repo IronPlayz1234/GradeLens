@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "ManageBac Grade Calculator",
-  "version": "1.20",
-  "icons": { "16": "assets/icons/icon-16.png", "32": "assets/icons/icon-32.png", "48": "assets/icons/icon-48.png", "128": "assets/icons/icon-128.png" },
-  "description": "Private, local grade estimates and what-if planning for ManageBac students. By Sohan Tripathy.",
+  "name": "GradeLens — for ManageBac",
+  "version": "1.21",
+  "icons": { "16": "assets/icons/gradelens-16.png", "32": "assets/icons/gradelens-32.png", "48": "assets/icons/gradelens-48.png", "128": "assets/icons/gradelens-128.png" },
+  "description": "Independent grade estimates and what-if planning for ManageBac. Created by Sohan Tripathy.",
+  "action": { "default_popup": "popup.html", "default_icon": { "16": "assets/icons/gradelens-16.png", "32": "assets/icons/gradelens-32.png" }, "default_title": "GradeLens — for ManageBac" },
   "permissions": ["storage"],
   "host_permissions": ["https://uia.managebac.com/*"],
   "background": { "service_worker": "src/storage.js" },
-  "web_accessible_resources": [{ "resources": ["src/ui/styles.css"], "matches": ["https://uia.managebac.com/*"] }],
+  "web_accessible_resources": [{ "resources": ["src/ui/styles.css", "src/ui/tokens.css", "assets/icons/gradelens-48.png"], "matches": ["https://uia.managebac.com/*"] }],
   "content_scripts": [{
     "matches": ["https://uia.managebac.com/student", "https://uia.managebac.com/student/*"],
     "js": [
@@ -16,10 +17,11 @@
       "src/content/scanner.js",
       "src/content/sync.js",
       "src/ui/theme.js",
+      "src/ui/icons.js",
       "src/ui/views.js",
       "src/content/index.js"
     ],
-    "css": ["src/ui/styles.css"],
+    "css": ["src/ui/tokens.css", "src/ui/styles.css"],
     "run_at": "document_idle"
   }]
 }

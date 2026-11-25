@@ -1,31 +1,6 @@
 (() => {
   const app = globalThis.MBGC;
-  const icons = {
-    grades: 'M4 19h16M6 15v-4m6 4V6m6 9V9',
-    estimator: 'M5 4v16m7-16v16m7-16v16M2 9h6m1 6h6m1-7h6',
-    refresh: 'M20 7v5h-5M4 17v-5h5m11 0a8 8 0 0 0-14-5m-2 5a8 8 0 0 0 14 5',
-    chevron: 'm6 9 6 6 6-6',
-    arrow: 'M4 12h15m-6-6 6 6-6 6',
-    external: 'M13 5h6v6m0-6-9 9m7-2v7H5V7h7',
-    search: 'M17 17l4 4m-2-10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z',
-    close: 'm6 6 12 12M18 6 6 18',
-    settings: 'M4 7h16M4 17h16M8 4v6m8 4v6',
-    book: 'M5 4h13a1 1 0 0 1 1 1v15H6a2 2 0 0 1-2-2V5a1 1 0 0 1 1-1Zm0 12h14M8 8h7',
-    plus: 'M12 5v14M5 12h14',
-    target: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-4a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-5h.01',
-    clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-14v5l3 2',
-    info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM12 11v5m0-8h.01',
-    alert: 'M10.3 4.6 2.6 18a1.6 1.6 0 0 0 1.4 2.4h16a1.6 1.6 0 0 0 1.4-2.4L13.7 4.6a2 2 0 0 0-3.4 0ZM12 9v4m0 3h.01'
-  };
-  function icon(name) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS(svg.namespaceURI, 'path');
-    path.setAttribute('d', icons[name]);
-    svg.append(path);
-    return svg;
-  }
+  const { icon } = app;
   function h(tag, classes, ...children) {
     const node = document.createElement(tag);
     if (classes) node.className = classes;
@@ -125,7 +100,7 @@
     const error = bucket?.lastErrorAt ? bucket.lastError : entry?.lastError;
     const scale = sync.overrides.scale ?? bucket?.scale ?? app.defaultScale;
     const scaleLabel = sync.overrides.scale ? 'Custom letter scale' : bucket?.scale ? 'Displayed task letter scale' : 'Default task letter scale';
-    const method = sync.settings.method;
+    const method = app.methodFor(sync.settings, classId);
     const compatible = cached?.weights === weights && cached.method === method && cached.revision === bucket?.dataRevision;
     const tasks = compatible ? cached.tasks : Object.values(bucket?.records ?? {}).sort((a, b) => a.title.localeCompare(b.title));
     const result = compatible ? cached.result : app.calculate(verified ? tasks : [], weights, method);
@@ -142,7 +117,7 @@
           bucket?.complete ? 'No graded assessments in this term.' :
             'Could not verify graded assessments for this term.') :
           result.percentage === null ? 'No graded assessments have a positive category weight.' : '';
-    return { classId, title: entry?.name || `Class ${classId}`, bucket, tasks, verified, weights, scale, scaleLabel,
+    return { classId, method, title: entry?.name || `Class ${classId}`, bucket, tasks, verified, weights, scale, scaleLabel,
       result, stale, customWeights: Boolean(customWeights), error, missing, provenance, termKey, label: bucket?.label || 'Unidentified term' };
   }
 
@@ -202,15 +177,22 @@
     return link;
   }
 
-  function categoryDetails(result, tasks) {
+  function categoryDetails(result, tasks, method) {
     const list = h('div', 'mbgc-categories');
+    const effectiveWeight = (item) => item.taskCount && item.weight > 0
+      ? item.weight * (method === 'absolute' ? item.taskCount : 1) : 0;
+    const totalWeight = result.breakdown.reduce((total, item) => total + effectiveWeight(item), 0);
     for (const category of result.breakdown) {
+      const contribution = result.percentage !== null && effectiveWeight(category)
+        ? category.average * effectiveWeight(category) / totalWeight : null;
       const row = h('section', 'mbgc-category',
         h('div', 'mbgc-category-heading',
           h('div', '', h('h4', '', category.name),
             h('p', 'mbgc-muted', Number.isFinite(category.weight) ? `${category.weight}% weight` : 'Weight unavailable',
               ' · ', `${category.gradedCount} graded`, category.simulated ? ' · Hypothetical' : '')),
-          h('strong', 'mbgc-category-value', percent(category.average))),
+          h('div', 'mbgc-category-metrics',
+            h('strong', 'mbgc-category-value', percent(category.average)),
+            contribution === null ? null : h('small', 'mbgc-muted', number(contribution) + ' pp contribution'))),
         track(category.average, category.name + ' average'));
       for (const task of category.tasks) {
         const assessment = h('div', 'mbgc-assessment',
@@ -239,7 +221,7 @@
   function searchableBreakdown(data, view) {
     const key = data.classId + ':' + data.termKey;
     const queryBySubject = view.searches ??= new Map();
-    const list = categoryDetails(data.result, data.tasks);
+    const list = categoryDetails(data.result, data.tasks, data.method);
     const input = h('input', 'mbgc-input');
     Object.assign(input, { type: 'search', placeholder: 'Search assessments...', value: queryBySubject.get(key) ?? '' });
     input.setAttribute('aria-label', 'Search assessments for ' + data.title);
@@ -310,7 +292,7 @@
     const item = h('section', 'mbgc-compact',
       h('div', 'mbgc-compact-main', h('span', 'mbgc-mark', icon('grades')),
         h('div', '', h('h2', '', name),
-          h('p', 'mbgc-muted', app.methods[sync.settings.method].label, ' · ', data.label))),
+          h('p', 'mbgc-muted', app.methods[data.method].label, ' · ', data.label))),
       h('div', 'mbgc-compact-result', score(data.result.percentage, data.scale),
         gradeInfo(data, 'mbgc-class-grade-info')),
       h('p', 'mbgc-compact-note mbgc-muted',
@@ -329,7 +311,7 @@
     const details = h('details', 'mbgc-subject');
     details.dataset.classId = data.classId;
     details.gradeEntry = sync.cache.classes[data.classId];
-    details.gradeKey = JSON.stringify([data.termKey, data.bucket?.dataRevision, sync.settings.method, data.weights, data.scaleLabel,
+    details.gradeKey = JSON.stringify([data.termKey, data.bucket?.dataRevision, data.method, sync.settings.method, sync.settings.subjectMethods?.[data.classId], data.weights, data.scaleLabel,
       data.stale, data.error, view.changed.has(data.classId + ':' + data.termKey)]);
     details.open = view.expanded.has(data.classId);
     let breakdown;
@@ -350,21 +332,24 @@
     open.href = uri;
     details.append(
       h('summary', 'mbgc-subject-summary',
-        h('div', 'mbgc-subject-name', h('span', 'mbgc-mark', icon('book')),
+        h('div', 'mbgc-subject-name',
           h('div', '', h('h3', '', data.title), h('p', 'mbgc-muted',
             data.verified ? `${data.result.count} graded assessment${data.result.count === 1 ? '' : 's'} · ${data.label}` : 'Term unavailable',
             view.changed.has(data.classId + ':' + data.termKey) ? h('span', 'mbgc-updated', ' · Grade updated') : ''))),
-        h('div', 'mbgc-subject-grade', score(data.result.percentage, data.scale),
+        h('div', 'mbgc-row-method',
+          h('span', '', { percentage: 'Percentage weights', points: 'Points-based averaging', absolute: 'Absolute weights' }[data.method]),
           track(data.result.percentage, data.title + ' calculated grade')),
+        h('div', 'mbgc-subject-grade', score(data.result.percentage, data.scale)),
         h('span', 'mbgc-subject-status', gradeInfo(data, 'mbgc-subject-info-' + data.classId)),
         h('span', 'mbgc-chevron', icon('chevron'))),
       h('div', 'mbgc-subject-detail',
+        subjectMethod(sync, data.classId),
         data.missing ? h('p', 'mbgc-notice', data.missing) : null,
         data.error ? h('p', 'mbgc-notice', data.error) :
           data.bucket?.lastScan && !data.bucket.complete ? h('p', 'mbgc-muted',
             'The extension could not confirm that the task list includes every assessment for this term. Any estimate shown uses the scored assessments listed here.') : null,
         h('div', 'mbgc-detail-meta',
-          h('p', 'mbgc-muted', app.methods[sync.settings.method].explanation, ' ',
+          h('p', 'mbgc-muted', app.methods[data.method].explanation, ' ',
             data.scaleLabel, '. ', data.provenance, '. ',
             data.bucket?.lastScan ? `Last successful sync ${time(data.bucket.lastScan)}.` : 'No successful sync for this term.',
             data.result.ungraded ? ` ${data.result.ungraded} ungraded or without usable numerical scores.` : '',
@@ -451,9 +436,10 @@
     content.append(h('summary', '', icon('settings'), 'Settings', icon('chevron')),
       h('div', 'mbgc-settings-body',
         h('section', 'mbgc-appearance', h('h3', '', 'Appearance'),
-          h('div', 'mbgc-appearance-controls', field('Card density', density), field('Animation intensity', motion),
+          h('div', 'mbgc-appearance-controls', appearanceField(sync), field('Card density', density), field('Animation intensity', motion),
             h('label', 'mbgc-toggle-label', bars, 'Show grade progress bars')),
           button('Show welcome guide', handlers.showWelcome, 'info')),
+        h('p', 'mbgc-muted', 'GradeLens ', chrome.runtime.getManifest().version, ' · Created by Sohan Tripathy — Inspired by Savir Bhaiya'),
         h('div', 'mbgc-settings-grid',
           h('div', '', field('Refresh interval (minutes)', minutes), text),
           h('div', '', field('Class for manual weights', classChoice), field('Category weights', weights)),
@@ -467,24 +453,33 @@
   }
 
   function welcomeGuide(handlers) {
-    const heading = h('h2', '', 'Welcome to your grades! 🎓');
+    const heading = h('h2', '', 'Welcome to GradeLens');
     heading.id = 'mbgc-welcome-heading';
     heading.tabIndex = -1;
+    const methods = h('details', 'mbgc-welcome-methods', h('summary', '', 'Compare calculation methods', icon('chevron')),
+      h('ul', '', ...Object.values(app.methods).map(({ label, explanation }) =>
+        h('li', '', h('strong', '', label), ' — ', explanation))));
     const panel = h('section', 'mbgc-panel mbgc-welcome',
-      heading, h('p', 'mbgc-muted', 'See your calculated grades, explore your assessments, and find out how future scores could change your results.'),
-      h('div', 'mbgc-welcome-sections',
-        h('section', '', h('h3', '', 'Your overall grades'),
-          h('p', '', 'See your estimated overall percentage and letter grade for each subject.')),
-        h('section', '', h('h3', '', 'Choose how grades are calculated'),
-          h('p', '', 'Switch methods to see how weighting changes the result.'),
-          h('ul', '', ...Object.values(app.methods).map(({ label, explanation }) => h('li', '', h('strong', '', label), ' — ', explanation)))),
-        h('section', '', h('h3', '', 'Try future scores'),
-          h('p', '', 'Use Grade Estimator to see how upcoming tests and assignments might affect your grade.'))),
-      h('p', 'mbgc-welcome-note', 'These are calculated estimates, not official grades. Your school may use a different calculation method.'),
-      h('div', 'mbgc-actions', button('Get started', handlers.dismissWelcome, 'arrow', 'mbgc-primary'),
-        button('Skip guide', handlers.dismissWelcome, null, 'mbgc-welcome-skip')));
+      h('div', 'mbgc-welcome-intro', h('div', '', heading,
+        h('p', 'mbgc-muted', 'See your grade estimates and try future scores. Your school may use a different calculation method.')),
+        h('div', 'mbgc-actions', button('Get started', handlers.dismissWelcome, 'arrow', 'mbgc-primary'),
+          button('Skip guide', handlers.dismissWelcome, null, 'mbgc-welcome-skip'))),
+      methods);
     panel.setAttribute('aria-labelledby', heading.id);
     return panel;
+  }
+
+  function subjectMethod(sync, classId) {
+    const options = [['', 'Use Global Default · ' + app.methods[app.methodFor(sync.settings)].label],
+      ...Object.entries(app.methods).map(([id, item]) => [id, item.label])];
+    return field('Subject calculation method', select(options, sync.settings.subjectMethods?.[classId] ?? '',
+      (id) => sync.setSubjectMethod(classId, id)));
+  }
+
+  function appearanceField(sync) {
+    return field('Appearance', select([['native', 'Match ManageBac'], ['system', 'Follow system'],
+      ['light', 'Light'], ['dark', 'Dark']], sync.settings.appearance ?? 'native',
+      (appearance) => sync.setSettings({ appearance })));
   }
 
   function header(sync, kind, view, handlers, termOptions) {
@@ -497,6 +492,7 @@
     termChoice.disabled = !termOptions.length;
     const method = select(Object.entries(app.methods).map(([id, item]) => [id, item.label]), sync.settings.method,
       (id) => sync.setSettings({ method: id }));
+    method.title = 'Global default for subjects without an override';
     const refresh = button(sync.refreshing ? 'Refreshing…' : 'Refresh now', () => sync.refresh(true), 'refresh');
     refresh.disabled = sync.refreshing;
     const syncText = h('div', 'mbgc-sync-text', icon(sync.refreshing ? 'refresh' : 'clock'),
@@ -504,17 +500,22 @@
     const state = h('p', 'mbgc-feedback mbgc-sync-failed',
       sync.refreshIssue ? 'We couldn’t finish updating grades. See Sync details.' : '');
     state.setAttribute('role', 'status');
+    const logo = h('img', 'mbgc-wordmark-icon');
+    logo.src = chrome.runtime.getURL('assets/icons/gradelens-48.png');
+    logo.alt = '';
+    logo.width = logo.height = 24;
     return h('header', 'mbgc-header',
       h('div', 'mbgc-header-line',
-        h('div', 'mbgc-header-title', h('span', 'mbgc-mark mbgc-header-mark', icon(isEstimator ? 'estimator' : 'grades')),
-          h('div', '', h('h1', '', isEstimator ? 'Grade Estimator' : 'Overall Grades'),
-            h('p', 'mbgc-muted', isEstimator ? 'Explore future scores and see what it takes to reach your target.' :
-              'Calculated estimates from your ManageBac assessments.'))),
-        h('div', 'mbgc-header-actions', refresh, button('Back to ManageBac', handlers.close, 'close', 'mbgc-close'))),
+        h('div', 'mbgc-wordmark', logo, h('strong', '', 'GradeLens')),
+        button('Back to ManageBac', handlers.close, 'close', 'mbgc-close')),
+      h('div', 'mbgc-header-title',
+        h('h1', '', isEstimator ? 'Grade Estimator' : 'Overall Grades'),
+        refresh),
       h('div', 'mbgc-toolbar',
         field('Academic term', termChoice),
-        field('Calculation method', method),
-        syncText), state, syncDiagnostics(sync, view));
+        field('Global calculation method', method),
+        syncText),
+      state, syncDiagnostics(sync, view));
   }
 
   function gradeLoading(classCount, checkedCount) {
@@ -553,14 +554,19 @@
     content.append(
       h('div', 'mbgc-section-heading', h('h2', '', 'Subjects'),
         h('span', 'mbgc-muted', `${subjects.length} ${subjects.length === 1 ? 'subject' : 'subjects'}`)));
-    if (rows.length) content.append(h('div', 'mbgc-subjects', rows.map((data) => subjectRow(sync, data, view))));
+    if (rows.length) {
+      const columns = h('div', 'mbgc-subject-columns', h('span', '', 'Subject'),
+        h('span', '', 'Method'), h('span', '', 'Calculated grade'));
+      columns.setAttribute('aria-hidden', 'true');
+      content.append(columns, h('div', 'mbgc-subjects', rows.map((data) => subjectRow(sync, data, view))));
+    }
     if (!hasEstimate) {
       const recovery = empty('No grade estimates for this term yet',
         'Check Sync details or try again. Grades appear when there are enough scored assessments and category weights.');
       recovery.append(button('Retry', () => sync.refresh(true), 'refresh'));
       content.append(recovery);
     }
-    content.append(h('p', 'mbgc-footnote', 'The school’s term calculation method and letter scale are unverified. Partial scans can miss assessments.'),
+    content.append(h('p', 'mbgc-footnote', 'GradeLens estimates are unofficial. Teacher-hidden assessments and unverified grading settings can make them differ from official grades.'),
       settings(sync, classes.map(([id, item]) => [id, item.name || 'Class ' + id]), view, handlers));
     return content;
   }
@@ -569,9 +575,9 @@
     const liveList = current?.querySelector('.mbgc-subjects');
     const nextList = next.querySelector('.mbgc-subjects');
     if (!liveList || !nextList || current.children.length !== next.children.length) return false;
-    const previous = new Map([...liveList.children].map((row) => [row.dataset.classId, row]));
-    let position = liveList.firstElementChild;
-    for (const row of [...nextList.children]) {
+    const previous = new Map([...liveList.querySelectorAll(':scope > .mbgc-subject')].map((row) => [row.dataset.classId, row]));
+    let position = liveList.querySelector(':scope > .mbgc-subject');
+    for (const row of nextList.querySelectorAll(':scope > .mbgc-subject')) {
       const id = row.dataset.classId;
       const prior = previous.get(id);
       const chosen = prior?.gradeEntry === row.gradeEntry && prior.gradeKey === row.gradeKey ? prior : row;
@@ -616,7 +622,8 @@
       view.scenario = null;
       handlers.render();
     });
-    page.append(h('div', 'mbgc-estimator-subject', field('Subject', choice)));
+    page.append(h('section', 'mbgc-estimator-subject', h('h2', '', 'Choose a subject'),
+      field('Subject', choice), subjectMethod(sync, view.classId)));
     const selectedKey = view.term === app.currentTerms ? app.classTermKey(sync.cache.classes[view.classId]) : view.term;
     if (view.scenarioTerm !== selectedKey) {
       view.scenarioTerm = selectedKey;
@@ -683,6 +690,7 @@
     predictedScore.setAttribute('aria-live', 'polite');
     const predictedTrack = track(null, 'Predicted grade', 'mbgc-track-large');
     const difference = h('p', 'mbgc-grade-difference');
+    const letterMovement = h('span', 'mbgc-letter-movement');
     const detailsContent = h('div', 'mbgc-estimator-breakdown');
     const targetResult = h('div', 'mbgc-target-result');
     targetResult.setAttribute('aria-live', 'polite');
@@ -714,7 +722,7 @@
       const entries = model.entries.filter((entry) => entry.id !== model.editing);
       const base = app.withHypotheticals(data.tasks, entries);
       const simulated = app.withHypotheticals(base, usable && !model.previewPaused ? [input] : []);
-      const result = app.calculate(simulated, data.weights, sync.settings.method, model.overrides);
+      const result = app.calculate(simulated, data.weights, data.method, model.overrides);
       const governedByOverride = Object.hasOwn(model.overrides, app.key(model.pick));
       sliderValue.textContent = usable ? percent(100 * model.points / model.max) : '—';
       slider.style.setProperty('--mbgc-progress', usable ? (100 * model.points / model.max) + '%' : '0%');
@@ -730,11 +738,15 @@
       difference.textContent = change === null ? '' : change === 0 ? 'No change in percentage points' :
         `${change > 0 ? '+' : '−'}${percentageFormat.format(Math.abs(change))} percentage points`;
       difference.dataset.direction = change > 0 ? 'up' : change < 0 ? 'down' : '';
+      const currentLetter = app.letter(data.result.percentage, data.scale);
+      const nextLetter = usable ? app.letter(result.percentage, data.scale) : null;
+      letterMovement.textContent = currentLetter && nextLetter && currentLetter !== nextLetter
+        ? currentLetter + ' → ' + nextLetter : '';
       add.disabled = !usable;
-      if (breakdown.open) detailsContent.replaceChildren(usable ? categoryDetails(result, simulated) : h('p', 'mbgc-muted', 'Enter valid points to preview the breakdown.'));
+      if (breakdown.open) detailsContent.replaceChildren(usable ? categoryDetails(result, simulated, data.method) : h('p', 'mbgc-muted', 'Enter valid points to preview the breakdown.'));
       if (!targetDetails.open) return;
       const target = model.targetMode === 'letter' ? data.scale.find(([, label]) => label === model.targetLetter)?.[0] : model.target;
-      const required = app.targetScore({ tasks: base, weights: data.weights, method: sync.settings.method,
+      const required = app.targetScore({ tasks: base, weights: data.weights, method: data.method,
         overrides: model.overrides, future: input, target });
       const inactive = result.breakdown.filter((item) => item.weight > 0 && !item.taskCount).map((item) => item.name);
       const label = Number.isFinite(target) ? `Target ${model.targetMode === 'letter' ? model.targetLetter + ' · ' : ''}${percent(target)}` : 'Enter a target';
@@ -830,10 +842,12 @@
       view.scenario = { ...defaults(), previewPaused: true };
       handlers.render();
     };
-    prediction.append(h('div', 'mbgc-prediction-top', icon('estimator'), h('span', '', 'Predicted overall grade')),
-      predictedScore, predictedTrack,
-      h('div', 'mbgc-actual', h('span', '', 'Current calculated grade'), score(data.result.percentage, data.scale)),
-      difference, h('p', 'mbgc-muted', gradeNotice(data)));
+    prediction.append(h('h2', '', 'Grade projection'),
+      h('div', 'mbgc-prediction-comparison',
+        h('div', 'mbgc-actual', h('span', '', 'Current calculated grade'), score(data.result.percentage, data.scale)),
+        h('span', 'mbgc-prediction-arrow', icon('arrow')),
+        h('div', 'mbgc-prediction-next', h('span', 'mbgc-prediction-top', 'Predicted overall grade'), predictedScore)),
+      predictedTrack, h('div', 'mbgc-projection-delta', difference, letterMovement), h('p', 'mbgc-muted', gradeNotice(data)));
     const breakdown = disclosure('Category breakdown', 'breakdownOpen', detailsContent);
     const targetDetails = disclosure('What score do I need?', 'targetOpen',
       h('p', 'mbgc-muted', 'Find the score this assessment would need to reach your target.'),
@@ -845,8 +859,7 @@
     page.append(
       h('div', 'mbgc-estimator-grid',
         h('section', 'mbgc-panel mbgc-model',
-          h('div', 'mbgc-panel-heading', h('span', 'mbgc-mark', icon('estimator')), h('div', '', h('h2', '', 'Try a grade'),
-            h('p', 'mbgc-muted', 'What would you like to do?'))),
+          h('div', 'mbgc-panel-heading', h('h2', '', 'Try a grade')),
           mode,
           h('p', 'mbgc-mode-help mbgc-muted', model.replaces
             ? 'Preview a different score for an assessment you’ve already taken.'
@@ -860,5 +873,5 @@
     update();
     return page;
   }
-  Object.assign(app, { h, icon, button, gradeData, compact, dashboard, patchDashboard, estimator });
+  Object.assign(app, { h, icon, button, gradeData, compact, dashboard, patchDashboard, estimator, appearanceField });
 })();

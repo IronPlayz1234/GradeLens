@@ -1,6 +1,6 @@
 (() => {
   const app = globalThis.MBGC;
-  const prefsKey = 'mbgc:preferences';
+  const prefsKey = app.preferencesKey;
   const overrideKey = (account) => 'mbgc:overrides:' + location.host + ':' + account;
   const parallelPages = 3;
   const pageLimit = 72;
@@ -98,7 +98,8 @@
       });
       chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'local' && changes[prefsKey]) {
-          this.settings = { ...app.settingsDefaults, ...changes[prefsKey].newValue };
+          this.settings = app.normalizeSettings(changes[prefsKey].newValue);
+          if (!this.settings.enabled) this.stopRefresh();
           this.update();
         }
         if (this.account && area === 'local' && changes[overrideKey(this.account)]) {
@@ -134,7 +135,7 @@
 
     async init() {
       const stored = (await chrome.storage.local.get(prefsKey))[prefsKey];
-      this.settings = { ...app.settingsDefaults, ...stored };
+      this.settings = app.normalizeSettings(stored);
       if (stored && !Object.hasOwn(stored, 'welcomeSeen')) await this.setSettings({ welcomeSeen: true });
     }
 
@@ -169,7 +170,7 @@
     }
 
     scanVisible(rows = null) {
-      const work = this.queue.then(() => this.readVisible(rows));
+      const work = this.queue.then(() => this.settings.enabled ? this.readVisible(rows) : undefined);
       this.queue = work.catch(() => {});
       return work;
     }
@@ -216,7 +217,7 @@
         this.update();
         return;
       }
-      if (url.pathname !== location.pathname || url.search !== location.search || !app.studentPath(url.pathname)) return;
+      if (!this.settings.enabled || url.pathname !== location.pathname || url.search !== location.search || !app.studentPath(url.pathname)) return;
       let snapshot;
       try {
         snapshot = app.scan(document, url);
@@ -257,6 +258,7 @@
     }
 
     async apply(snapshots, checks = []) {
+      if (!this.settings.enabled) return;
       const account = this.account;
       if (!account) {
         for (const snapshot of snapshots) app.mergeScan(this.cache, snapshot);
@@ -285,11 +287,24 @@
       this.update();
     }
 
-    async setSettings(patch) {
+    async savePreferences(change) {
+      try {
+        await request('preferences', null, change);
+        return true;
+      } catch {
+        this.message = 'Preferences could not be saved. Reload this ManageBac tab and try again.';
+        this.update();
+        return false;
+      }
+    }
+
+    setSettings(patch) {
       if (Object.entries(patch).every(([key, value]) => this.settings[key] === value)) return;
-      this.settings = { ...this.settings, ...patch };
-      await chrome.storage.local.set({ [prefsKey]: this.settings });
-      this.update();
+      return this.savePreferences({ patch });
+    }
+
+    setSubjectMethod(id, method) {
+      return this.savePreferences({ subject: { id, method } });
     }
 
     async setOverrides(patch) {
@@ -497,12 +512,12 @@
     }
 
     async refresh(manual = false) {
-      if (this.refreshing || (!manual && (document.visibilityState !== 'visible' ||
+      if (!this.settings.enabled || this.refreshing || (!manual && (document.visibilityState !== 'visible' ||
         !['#mbgc-overall-grades', '#mbgc-grade-estimator'].includes(location.hash)))) return;
       const interval = this.settings.refreshMinutes * 60000;
       if (!manual && !interval) return;
       if (manual || !this.context || this.storageState === 'unavailable') await this.scanVisible();
-      if (this.refreshing || (!manual && document.hidden)) return;
+      if (!this.settings.enabled || this.refreshing || (!manual && document.hidden)) return;
       const account = this.account;
       if (!account || this.storageState === 'unavailable') {
         if (manual && !this.accountChanged && !account) {

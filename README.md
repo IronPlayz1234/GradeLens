@@ -1,4 +1,4 @@
-# ManageBac Grade Calculator
+# GradeLens — for ManageBac
 
 A private Chrome extension for students at `uia.managebac.com`. It adds **Overall Grades** and **Grade Estimator** below **My Workspace → Tasks & Deadlines**. Class Overview gets a compact grade card, and Class Tasks gets a second card inside **All Tasks**, above the native charts.
 
@@ -8,10 +8,16 @@ A private Chrome extension for students at `uia.managebac.com`. It adds **Overal
 2. Turn on **Developer mode**.
 3. Click **Load unpacked** and select the project folder that contains `manifest.json`.
 4. Open or reload a signed-in student page on `https://uia.managebac.com`.
-5. Open **Overall Grades** and choose the academic term and calculation method. The method applies across all four grade views.
+5. Open **Overall Grades** and choose the academic term and calculation method. The global default applies to any subject without its own method across all grade views.
 6. Open **Class Tasks** or **Tasks & Deadlines → Past** if grades or weights are missing. Scroll or use the site’s controls to load additional historical tasks. Click **Refresh now** under **Overall Grades** or **Grade Estimator** to check available pages again.
 
 The project folder is the unpacked extension. It runs without a build, npm install, or development server. After changing files, click the reload arrow on the extension in `chrome://extensions`, then reload the ManageBac tab.
+
+## Toolbar and subject methods
+
+Click the GradeLens icon to open the toolbar popup. From a signed-in student tab, you can open either grade view or the full settings, check sync status, and change the default or a subject’s method. Subject choices use stable ManageBac class IDs. Choose **Use Global Default** to remove an override. The same choice applies to Overall Grades, predicted grades and targets, sidebar badges, and both class cards. These are estimates and may omit teacher-hidden assessments.
+
+The popup also controls the master switch, individual placement and navigation toggles, and appearance. Appearance controls are available in Overall Grades settings and on a recognized ManageBac Personalisation page. **Match ManageBac** follows the native appearance. Optional dark mode covers recognized native components and yields native-page styling to ManageBac Reimagined while it is active. Refresh the site once after installing an extension update. Saved changes subsequently apply to open tabs. Reload the unpacked extension in place to keep its existing cache and preferences.
 
 ## Grades and what-if scenarios
 
@@ -73,3 +79,11 @@ npm run test:browser
 ```
 
 The browser suite defaults to Playwright’s Chrome for Testing build. For a secondary Opera GX check on macOS, launch the same fixtures with a temporary profile using `MBGC_BROWSER_PATH='/Applications/Opera GX.app/Contents/MacOS/Opera' npm run test:browser`.
+
+## Visual assets
+
+The GradeLens lens-and-chart icon was created with the built-in ImageGen tool. The transparent master and the 16, 32, 48, and 128 px PNGs are under `assets/icons/gradelens-*.png`. The sidebar SVG paths are bundled in `src/ui/icons.js` with the upstream license in `assets/LUCIDE-LICENSE.txt`.
+
+ImageGen prompt:
+
+> Use case: logo-brand. Create a single original GradeLens browser extension app icon. Center an app icon tile with a softly rounded square silhouette, filling about 90% of the square canvas, transparent outside the tile. Deep ink blue tile, distinctive bright mint turquoise magnifying lens whose glass encloses three ascending chart bars, a short clean diagonal handle to the lower right. Bold, simple geometry, generous negative space, high contrast, crisp edges with restrained premium finish, no detailed reflections. Works in a Chrome toolbar at 16px. No letters, no text, no graduation cap, no mockup, no surrounding graphics.
