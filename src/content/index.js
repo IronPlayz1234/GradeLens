@@ -7,13 +7,17 @@
   stageHost.append(stage);
 
   async function isolateDashboard() {
-    const response = await fetch(chrome.runtime.getURL('src/ui/styles.css'));
-    if (!response.ok) return;
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(await response.text());
-    const shadow = stageHost.attachShadow({ mode: 'open' });
-    shadow.adoptedStyleSheets = [sheet];
-    shadow.append(stage);
+    try {
+      const response = await fetch(chrome.runtime.getURL('src/ui/styles.css'));
+      if (!response.ok) return;
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(await response.text());
+      const shadow = stageHost.attachShadow({ mode: 'open' });
+      shadow.adoptedStyleSheets = [sheet];
+      shadow.append(stage);
+    } catch {
+      // Chrome can invalidate an existing content script during extension reload.
+    }
   }
   const card = app.h('div', 'mbgc-owned mbgc-card-host');
   let nav = [];
