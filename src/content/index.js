@@ -35,6 +35,7 @@
   let wasViewing = false;
   let lastRenderedMethod;
   let gradeRevision = '';
+  let renderedView;
   let fullScan = false;
   let dirtyRows = new Set();
   let scanQueuedAt = 0;
@@ -78,7 +79,7 @@
     }
     if (content) {
       if (stageHost.parentNode !== content) content.prepend(stageHost);
-      content.classList.add('mbgc-native-view');
+      if (!content.classList.contains('mbgc-native-view')) content.classList.add('mbgc-native-view');
     } else if (stageHost.parentNode !== document.body) document.body.append(stageHost);
   }
 
@@ -167,11 +168,15 @@
     const main = knownMain() ?? document;
     const heading = app.heading(document, /^latest activity$/i);
     if (heading) {
-      const section = heading.closest('section,article,.section,.panel,.card') ?? heading;
+      const panel = heading.closest('section,article,.section,.panel,.card');
+      const section = panel && !panel.querySelector('h1,.class-title,[data-class-title]') ? panel : heading;
       if (section.previousElementSibling !== card) section.before(card);
       return card.isConnected;
     }
-    if (main instanceof HTMLElement && main.firstElementChild !== card) main.prepend(card);
+    const title = document.querySelector('.class-title,[data-class-title]') ?? main.querySelector('h1');
+    const header = title?.closest('header,[role="banner"]') ?? title;
+    if (header && header.nextElementSibling !== card) header.after(card);
+    else if (!header && main instanceof HTMLElement && main.lastElementChild !== card) main.append(card);
     return card.isConnected;
   }
 
@@ -269,8 +274,10 @@
           content.classList.add('mbgc-method-changed');
         }
         lastRenderedMethod = sync.settings.method;
-        stage.replaceChildren(content);
-        focus?.focus({ preventScroll: true });
+        const patched = panel === 'grades' && renderedView === panel && app.patchDashboard(stage.firstElementChild, content);
+        if (!patched) stage.replaceChildren(content);
+        if (focus?.isConnected) focus.focus({ preventScroll: true });
+        renderedView = panel;
         if (!wasViewing) {
           const heading = stage.querySelector('h1');
           heading.tabIndex = -1;
@@ -282,6 +289,7 @@
     } else {
       unmountDashboard();
       viewKey = '';
+      renderedView = null;
       wasViewing = false;
       if (!current.classId || !['tasks', 'overview'].includes(current.type)) {
         card.remove();
@@ -335,6 +343,9 @@
     if (previous.pathname !== next.pathname || previous.search !== next.search) {
       sync.stopRefresh();
       queueScan();
+    } else if (previous.hash !== next.hash) {
+      if (views[next.hash]) void sync.refresh();
+      else if (!sync.manualRefresh) sync.stopRefresh();
     }
     render();
   }

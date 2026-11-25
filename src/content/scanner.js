@@ -28,7 +28,7 @@
     try {
       if (!raw || /^[#?]$/.test(raw)) return null;
       const url = new URL(raw, base);
-      return url.origin === new URL(base).origin && !url.username && !url.password ? url : null;
+      return url.origin === (base instanceof URL ? base.origin : new URL(base).origin) && !url.username && !url.password ? url : null;
     } catch {
       return null;
     }
@@ -36,7 +36,7 @@
 
   function route(url) {
     const match = url.pathname.match(classPattern);
-    if (match) return { classId: match[1], type: match[3] ? 'task' : match[2] ? 'tasks' : 'overview' };
+    if (match) return { classId: match[1], taskId: match[3], type: match[3] ? 'task' : match[2] ? 'tasks' : 'overview' };
     if (rosterPattern.test(url.pathname)) return { type: 'roster' };
     if (url.pathname.replace(/\/$/, '') === workspacePath) return { type: 'workspace' };
     return { type: 'other' };
@@ -98,7 +98,10 @@
         if (control.tagName === 'SELECT') {
           const option = control.options?.[control.selectedIndex] ??
             control.querySelector('option[selected]') ?? control.querySelector('option');
-          if (!option) continue;
+          if (!option) {
+            accept(id(control.getAttribute('data-selected-term-id')), control.getAttribute('data-term-label'));
+            continue;
+          }
           const declared = control.matches(selectors.term) || isTermField(control.name || control.getAttribute('name')) ||
             isTermField(control.id) || termLabel.test([control.getAttribute('aria-label'), control.closest('label')?.textContent].join(' '));
           const value = option.getAttribute('value');
@@ -106,7 +109,8 @@
           const linked = optionURL && route(optionURL).classId === context.classId && route(optionURL).type === 'tasks'
             ? termFromURL(optionURL)?.id : null;
           if (declared || (scoped && termLabel.test(txt(option)))) {
-            accept(id(option.getAttribute('data-term-id')) || linked || (declared ? id(value) : stableOption(value)), txt(option));
+            accept(id(option.getAttribute('data-term-id')) || linked || (declared ? id(value) : stableOption(value)) ||
+              id(control.getAttribute('data-selected-term-id')), txt(option));
           }
         } else {
           accept(id(control.getAttribute('data-selected-term-id')),
@@ -118,6 +122,17 @@
         const choices = new Set(scope.querySelectorAll(optionSelector));
         const triggers = [...scope.querySelectorAll('[role="combobox"],button,[role="button"],.dropdown-toggle')]
           .filter((node) => exposed(node) && termLabel.test(txt(node)));
+        for (const trigger of triggers) {
+          accept(id(trigger.getAttribute('data-term-id') || trigger.getAttribute('data-semester-id')), txt(trigger));
+        }
+        for (const input of scope.querySelectorAll('form input[type="hidden"][name]')) {
+          const form = input.closest('form');
+          const action = localURL(form.getAttribute('action') || url.href, url);
+          if (action && route(action).type === 'tasks' && route(action).classId === context.classId &&
+            /^get$/i.test(form.getAttribute('method') || 'get') && isTermField(input.name || input.getAttribute('name'))) {
+            accept(id(input.getAttribute('value')), triggers.length === 1 ? txt(triggers[0]) : '');
+          }
+        }
         const menus = new Map(triggers.map((trigger) => [trigger, doc.getElementById(trigger.getAttribute('aria-controls') || '')]));
         for (const menu of menus.values()) {
           for (const choice of menu?.querySelectorAll(optionSelector) ?? []) choices.add(choice);
@@ -166,11 +181,16 @@
     const fromControl = find(surface.section, true) || find(doc, false);
     if (fromControl) return fromControl;
     if (query) return { id: query.id, label: 'Selected academic term' };
+    if (context.type === 'tasks' && surface.section && !surface.section.querySelector(selectors.termControls)) {
+      const lists = [...surface.section.querySelectorAll('[data-task-list="all"][data-term-id]')].filter(exposed);
+      const ids = new Set(lists.map((list) => id(list.getAttribute('data-term-id'))));
+      if (ids.size === 1 && !ids.has(null)) return { id: [...ids][0], label: 'Selected academic term' };
+    }
     return { id: null, label: 'Unidentified term' };
   }
 
   function account(doc, url) {
-    const links = doc.querySelectorAll('header a[href], nav a[href], [role="banner"] a[href], [data-account-menu] a[href]');
+    const links = doc.querySelectorAll('header a[href], nav a[href], [role="banner"] a[href], [data-account-menu] a[href], aside a[href], [role="menu"] a[href], .dropdown-menu a[href]');
     const ids = new Set();
     for (const meta of doc.querySelectorAll('meta[name="current-student-id"], meta[name="current-user-id"], meta[name="current_student_id"], meta[name="current_user_id"]')) {
       const value = meta.getAttribute('content');
@@ -237,7 +257,7 @@
     const url = localURL(raw, base);
     if (!url) return null;
     const { type } = route(url);
-    if (!['tasks', 'workspace', 'roster'].includes(type)) return null;
+    if (!['tasks', 'workspace', 'roster', 'task'].includes(type) || (type === 'task' && url.search)) return null;
     if (type === 'roster' && [...url.searchParams].some(([name, value]) =>
       !((name === 'page' && /^\d{1,4}$/.test(value)) || (['tab', 'view', 'filter'].includes(name) && enrolledFilter.test(value))))) return null;
     url.hash = '';
@@ -254,7 +274,9 @@
       [...doc.querySelectorAll('[aria-current="page"],[aria-selected="true"],.active')].some((node) => /^browse all classes$/i.test(txt(node))));
     for (const link of doc.querySelectorAll(discoveryLinks)) {
       if (link.closest('.mbgc-owned')) continue;
-      const destination = localURL(link.getAttribute('href'), url);
+      const href = link.getAttribute('href');
+      if (/\/(?:core_tasks|tasks)\/\d+(?:[/?#]|$)/.test(href)) continue;
+      const destination = localURL(href, url);
       if (!destination) continue;
       const location = route(destination);
       if (location.type === 'roster' && sourceURL(destination, url) &&
@@ -341,9 +363,9 @@
     const nodes = new Set(known.filter((node) => !node.matches('[data-task-id], [data-assignment-id], [data-assessment-id]') ||
       ['DIV', 'LI', 'ARTICLE', 'SECTION', 'TR'].includes(node.tagName)));
     for (const link of doc.querySelectorAll(assessmentLinks)) {
+      if (link.closest(selectors.tasks) || !exposed(link)) continue;
       const destination = localURL(link.getAttribute('href'), url);
-      if (!destination || route(destination).type !== 'task' || !exposed(link) ||
-        link.closest(selectors.tasks)) continue;
+      if (!destination || route(destination).type !== 'task') continue;
       // An alternate task row needs its own stable task link and a local score container.
       for (let row = link.parentElement; row && !row.matches('main, body'); row = row.parentElement) {
         const links = [...row.querySelectorAll('a[href]')].filter((item) => {
@@ -360,15 +382,19 @@
     return [...nodes];
   }
 
-  function readTask(node, url, context, term, classes, weights) {
-    const { link, destination } = taskLink(node, url);
-    const match = destination?.pathname.match(classPattern);
-    if (!match?.[3] || (context.classId && context.classId !== match[1])) return null;
-
-    const classId = match[1];
+  function readTask(node, url, context, term, classes, weights, detail = false) {
+    const { link, destination } = detail ? { destination: url } : taskLink(node, url);
+    const linked = destination && route(destination);
+    const declared = [...new Set(['data-task-id', 'data-assignment-id', 'data-assessment-id']
+      .map((name) => node.getAttribute(name)).filter(Boolean))];
+    if (declared.length > 1 || (linked && declared.length && declared[0] !== linked.taskId)) return null;
+    const taskId = linked?.taskId || (context.type === 'tasks' && stableOption(declared[0]));
+    const classId = linked?.classId || context.classId;
+    if (!taskId || !classId || (context.classId && classId !== context.classId) ||
+      (node.hasAttribute('data-class-id') && node.getAttribute('data-class-id') !== classId)) return null;
     const termOwner = node.closest('[data-term-id],[data-academic-term-id],[data-semester-id]');
     const termId = id(termOwner?.getAttribute('data-term-id') || termOwner?.getAttribute('data-academic-term-id') ||
-      termOwner?.getAttribute('data-semester-id')) || (context.type === 'tasks' ? term.id : null);
+      termOwner?.getAttribute('data-semester-id')) || (context.type === 'tasks' || detail ? term.id : null);
     const labels = [...node.querySelectorAll('.labels-set .label')]
       .filter((label) => !label.closest(selectors.score)).map(txt).filter(Boolean);
     const assessmentType = clean(node.getAttribute('data-assessment-type')) ||
@@ -384,7 +410,7 @@
     const category = explicitCategory || (recognized.length === 1 ? recognized[0] : categories.length === 1 ? categories[0] : '');
     const outsideRubric = (element) => exposed(element) && !element.closest(selectors.rubric);
     const scores = [...node.querySelectorAll(selectors.score)].filter(outsideRubric);
-    const score = scores[0];
+    const score = node.matches(selectors.score) && outsideRubric(node) ? node : scores[0];
     const points = [...node.querySelectorAll(selectors.points)].filter((item) => outsideRubric(item) &&
       (!item.querySelector(selectors.rubric) || item.hasAttribute('data-earned-points')));
     if (node.matches(selectors.points) && outsideRubric(node)) points.push(node);
@@ -394,7 +420,7 @@
       : txt(item).match(pointsText)?.slice(1).map(Number);
     const parsed = points.map(parse);
     if (!points.length) {
-      for (const item of scores) {
+      for (const item of new Set([...(score ? [score] : []), ...scores])) {
         // Don't interpret a criterion's points as the assignment's total.
         if (item.querySelector(selectors.rubric)) continue;
         const match = parse(item);
@@ -406,18 +432,22 @@
     const letterNode = [...node.querySelectorAll(selectors.letter)].find(outsideRubric);
     const displayedLetter = clean(letterNode?.getAttribute('data-letter-grade')) || txt(letterNode);
     const rubric = [...node.querySelectorAll(selectors.rubric)].some(exposed);
+    const resultsLink = Boolean(destination) && !detail && [...node.querySelectorAll('a[data-assessment-result-link],a[data-task-result-link],a[aria-label]')]
+      .some((item) => (item.matches('[data-assessment-result-link],[data-task-result-link]') ||
+        /^view (?:grade|result|assessment result)$/i.test(item.getAttribute('aria-label'))) &&
+        localURL(item.getAttribute('href'), url)?.pathname === destination.pathname);
     const explicitlyUngraded = Boolean(score?.matches('[data-graded="false"]') || node.matches('[data-graded="false"]'));
     const excluded = node.matches('[data-grade-eligible="false"],[data-counts-toward-grade="false"]');
     const result = {
-      id: match[3], classId, subject, termId, category, assessmentType,
-      title: txt(link) || `Assessment ${match[3]}`,
+      id: taskId, classId, subject, termId, category, assessmentType,
+      title: txt(link) || firstText(node, '.task-title,.title') || `Assessment ${taskId}`,
       earnedPoints: scoreMatch?.[0] ?? null,
       maxPoints: scoreMatch?.[1] ?? null,
       displayedLetter,
       status: firstText(node, '.submission-status, .task-status') ||
         (txt(score).match(/\b(not submitted|submitted|pending|ungraded)\b/i)?.[0] ?? ''),
-      taskUrl: destination.pathname,
-      excluded, explicitlyUngraded, gradeKind: 'ungraded', issue: null
+      taskUrl: destination?.pathname ?? null,
+      excluded, explicitlyUngraded, resultsLink, gradeKind: 'ungraded', issue: null
     };
     if (explicitlyUngraded) {
       result.earnedPoints = null;
@@ -437,6 +467,21 @@
       if (!category) result.issue = 'Category unavailable or ambiguous';
     }
     return result;
+  }
+
+  function scanTaskDetail(doc, url, known) {
+    const context = route(url);
+    if (context.type !== 'task' || context.classId !== known.classId || context.taskId !== known.id || !known.termId) return null;
+    // Only use a dedicated assignment result region. Other parts of a detail page can contain rubric or class scores.
+    const results = [...doc.querySelectorAll('[data-assessment-result], .assessment-result')].filter(exposed);
+    if (results.length !== 1) return null;
+    const term = pageTerm(doc, url);
+    if (term.id && term.id !== known.termId) return null;
+    const score = readTask(results[0], url, context, { id: known.termId }, {}, {}, true);
+    if (!score || score.termId !== known.termId || !app.validScore(score)) return null;
+    return { context, term: { id: known.termId, label: null }, sources: [], classes: {}, weights: {},
+      records: [{ ...known, earnedPoints: score.earnedPoints, maxPoints: score.maxPoints, gradeKind: 'points',
+        issue: known.category ? null : 'Category unavailable or ambiguous' }], completeRecord: true, at: Date.now() };
   }
 
   function readScoreChanges(url, previous, rows) {
@@ -514,7 +559,9 @@
       scoreIssues: assessments.filter((task) => task.issue && !app.validScore(task)).length,
       unassigned: assessments.filter((task) => app.validScore(task) && !task.termId).length,
       weights: Object.keys(weights).length, complete,
-      loading: Boolean(surface.section?.querySelector('[aria-busy="true"],[data-loading="true"]'))
+      loading: Boolean(surface.section?.querySelector('[aria-busy="true"],[data-loading="true"]')) ||
+        Boolean(term.id && [...(surface.section?.querySelectorAll('[data-task-list="all"][data-term-id]') ?? [])]
+          .some((list) => exposed(list) && list.getAttribute('data-term-id') !== term.id))
     };
     return {
       ...found, context, term, weights, scale, records: assessments, complete, diagnostic,
@@ -523,5 +570,5 @@
     };
   }
 
-  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, discoveryLinks });
+  Object.assign(app, { selectors, clean, numeric, localURL, route, pageTerm, account, scan, workspacePath, studentPath, heading, taskSurface, termFromURL, sourceURL, readScoreChanges, scanTaskDetail, discoveryLinks });
 })();

@@ -36,8 +36,9 @@
     node.addEventListener('click', action);
     return node;
   }
+  const percentageFormat = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const percent = (value) => Number.isFinite(value)
-    ? new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) + '%'
+    ? percentageFormat.format(value) + '%'
     : '—';
   const number = (value, digits = 2) => new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(value);
   const time = (stamp) => stamp ? new Date(stamp).toLocaleString(undefined, {
@@ -56,12 +57,12 @@
 
   function syncStatus(sync) {
     const scan = sync.diagnostics;
-    if (sync.storageState === 'unavailable') return 'Session cache unavailable. Grades found on this page are temporary. Reload the extension and this tab, then refresh.';
+    if (sync.storageState === 'unavailable') return 'Grade cache unavailable. Grades found on this page are temporary. Reload the extension and this tab, then refresh.';
     if (!scan) return 'Checking the current page…';
     if (scan.failed) return 'Page extraction failed. Reload Class Tasks and use Refresh now.';
     if (scan.loading) return 'The selected term is still loading. Wait for the native task list or refresh it.';
     if (!['tasks', 'workspace'].includes(scan.page)) return sync.cache.lastSync ? '' :
-      'Open a class’s Tasks tab to collect its term, assessment points, and weights.';
+      (sync.account ? 'Checking available class pages for grades.' : 'Student identity unavailable. Only this page’s grades can be used.');
     if (!scan.parsed) return scan.candidates
       ? 'Task elements were found, but their stable assessment links could not be read. Check Sync diagnostics.'
       : 'No assessment rows detected on this page. Load the native task list or open Tasks & Deadlines → Past.';
@@ -80,8 +81,8 @@
     details.open = Boolean(view.diagnosticsOpen);
     details.addEventListener('toggle', () => { view.diagnosticsOpen = details.open; });
     details.append(h('summary', '', 'Sync diagnostics'));
-    const storage = sync.storageState === 'session' ? 'Verified student session cache' :
-      sync.storageState === 'unavailable' ? 'Session cache unavailable · current document only' :
+    const storage = sync.storageState === 'session' ? 'Verified student grade cache' :
+      sync.storageState === 'unavailable' ? 'Grade cache unavailable · current document only' :
         'Current document only · student identity could not be verified';
     details.append(h('p', 'mbgc-muted', storage));
     if (report && !report.failed && ['tasks', 'workspace'].includes(report.page)) {
@@ -96,26 +97,36 @@
     return details;
   }
 
+  const calculated = new WeakMap();
   function gradeData(sync, classId, termKey) {
     const entry = sync.cache.classes[classId];
     const bucket = entry?.terms[termKey];
-    const tasks = Object.values(bucket?.records ?? {}).sort((a, b) => a.title.localeCompare(b.title));
+    const cached = bucket && calculated.get(bucket);
     const verified = Boolean(bucket?.termId);
     const weights = sync.overrides.weights[classId] ?? bucket?.weights ?? {};
     const error = bucket?.lastErrorAt ? bucket.lastError : entry?.lastError;
     const scale = sync.overrides.scale ?? bucket?.scale ?? app.defaultScale;
     const scaleLabel = sync.overrides.scale ? 'Custom letter scale' : bucket?.scale ? 'Displayed task letter scale' : 'Default task letter scale';
-    const result = app.calculate(verified ? tasks : [], weights, sync.settings.method);
+    const method = sync.settings.method;
+    const compatible = cached?.weights === weights && cached.method === method && cached.revision === bucket?.dataRevision;
+    const tasks = compatible ? cached.tasks : Object.values(bucket?.records ?? {}).sort((a, b) => a.title.localeCompare(b.title));
+    const result = compatible ? cached.result : app.calculate(verified ? tasks : [], weights, method);
+    if (bucket && !compatible) calculated.set(bucket, { tasks, result, weights, method, revision: bucket.dataRevision });
+    const lastSource = { rendered: 'rendered student page', background: 'background HTML' }[bucket?.lastSource];
+    const provenance = lastSource
+      ? (error || (sync.openedAt && bucket.lastScan < sync.openedAt) ? 'Cache · last read from ' + lastSource : 'Source: ' + lastSource)
+      : (bucket?.lastScan ? 'Source: cache' : 'Source unavailable');
     const staleAfter = Math.max(15, sync.settings.refreshMinutes * 2) * 60000;
     const stale = Boolean(bucket?.lastScan && Date.now() - bucket.lastScan > staleAfter);
     const provisional = !bucket?.complete || Boolean(error) || result.flagged > 0 || stale || Boolean(sync.overrides.weights[classId]);
     const missing = !verified ? 'Term unavailable. Confirm the academic term in Class Tasks.' :
       result.missing.length ? `Weights needed for ${result.missing.join(', ')}.` :
         !result.count ? (result.flagged ? 'Assessment points are missing or invalid.' :
-          tasks.length ? 'No graded assessments in this term.' : 'No assessment rows synced for this term.') :
+          bucket?.complete ? 'No graded assessments in this term.' :
+            'Could not verify graded assessments for this term.') :
           result.percentage === null ? 'No graded assessments have a positive category weight.' : '';
     return { classId, title: entry?.name || `Class ${classId}`, bucket, tasks, verified, weights, scale, scaleLabel,
-      result, stale, provisional, error, missing, termKey, label: bucket?.label || 'Unidentified term' };
+      result, stale, provisional, error, missing, provenance, termKey, label: bucket?.label || 'Unidentified term' };
   }
 
   function score(value, scale, className = '') {
@@ -193,7 +204,7 @@
   }
 
   function labelStatus(data) {
-    return data.stale ? 'Stale cache' : data.provisional ? 'Partial data' : 'Complete scan';
+    return data.error ? "Couldn’t refresh" : data.stale ? 'Last sync out of date' : data.provisional ? 'Some grades unavailable' : data.result.count ? 'Up to date' : 'No graded assessments';
   }
 
   function compact(sync, data, type, changed) {
@@ -205,7 +216,9 @@
       h('div', 'mbgc-compact-result', score(data.result.percentage, data.scale),
         h('span', 'mbgc-chip', labelStatus(data))),
       h('p', 'mbgc-compact-note mbgc-muted',
-        changed ? 'Grade updated · ' : '', data.missing ? data.missing + ' ' : '',
+        changed ? 'Grade updated · ' : '',
+        data.verified ? `${data.result.count} graded assessment${data.result.count === 1 ? '' : 's'}. ` : '',
+        data.missing ? data.missing + ' ' : '',
         data.bucket?.lastScan ? `Synced ${time(data.bucket.lastScan)}. ` : '',
         data.error ? data.error + ' ' : '',
         (type === 'tasks' || sync.storageState === 'unavailable') && syncStatus(sync)
@@ -216,10 +229,23 @@
 
   function subjectRow(sync, data, view) {
     const details = h('details', 'mbgc-subject');
+    details.dataset.classId = data.classId;
+    details.gradeEntry = sync.cache.classes[data.classId];
+    details.gradeKey = JSON.stringify([data.termKey, data.bucket?.dataRevision, sync.settings.method, data.weights, data.scaleLabel,
+      data.stale, data.error, view.changed.has(data.classId + ':' + data.termKey)]);
     details.open = view.expanded.has(data.classId);
+    let breakdown;
+    function openBreakdown() {
+      if (!breakdown) breakdown = categoryDetails(data.result, data.tasks);
+      const content = details.querySelector('.mbgc-subject-detail');
+      if (content && breakdown.parentNode !== content) content.append(breakdown);
+    }
     details.addEventListener('toggle', () => {
-      if (details.open) view.expanded.add(data.classId);
-      else view.expanded.delete(data.classId);
+      if (!details.isConnected) return;
+      if (details.open) {
+        view.expanded.add(data.classId);
+        openBreakdown();
+      } else view.expanded.delete(data.classId);
     });
     const uri = '/student/classes/' + data.classId + '/core_tasks';
     const open = h('a', 'mbgc-text-link', 'Open class Tasks', icon('arrow'));
@@ -241,12 +267,13 @@
             'The full task list could not be verified. Open Class Tasks if ManageBac loads additional assessments after rendering.') : null,
         h('div', 'mbgc-detail-meta',
           h('p', 'mbgc-muted', app.methods[sync.settings.method].explanation, ' ',
-            data.scaleLabel, '. ', data.bucket?.lastScan ? `Last successful sync ${time(data.bucket.lastScan)}.` : 'No successful sync for this term.',
+            data.scaleLabel, '. ', data.provenance, '. ',
+            data.bucket?.lastScan ? `Last successful sync ${time(data.bucket.lastScan)}.` : 'No successful sync for this term.',
             data.result.ungraded ? ` ${data.result.ungraded} without usable scores.` : '',
             data.result.flagged ? ` ${data.result.flagged} flagged for review.` : '',
             data.result.excluded ? ` ${data.result.excluded} excluded by grading rules.` : ''),
-          open),
-        categoryDetails(data.result, data.tasks)));
+          open)));
+    if (details.open) openBreakdown();
     return details;
   }
 
@@ -377,6 +404,37 @@
     content.append(h('p', 'mbgc-footnote', 'The school’s term calculation method and letter scale are unverified. Partial scans can miss assessments.'),
       settings(sync, classes.map(([id, item]) => [id, item.name || 'Class ' + id]), view));
     return content;
+  }
+
+  function patchDashboard(current, next) {
+    const liveList = current?.querySelector('.mbgc-subjects');
+    const nextList = next.querySelector('.mbgc-subjects');
+    if (!liveList || !nextList) return false;
+    const previous = new Map([...liveList.children].map((row) => [row.dataset.classId, row]));
+    let position = liveList.firstElementChild;
+    for (const row of [...nextList.children]) {
+      const id = row.dataset.classId;
+      const prior = previous.get(id);
+      const chosen = prior?.gradeEntry === row.gradeEntry && prior.gradeKey === row.gradeKey ? prior : row;
+      if (prior && chosen === row) chosen.open = prior.open;
+      if (chosen !== position) liveList.insertBefore(chosen, position);
+      position = chosen.nextElementSibling;
+      if (prior && prior !== chosen) {
+        if (position === prior) position = prior.nextElementSibling;
+        prior.remove();
+      }
+      previous.delete(id);
+    }
+    for (const row of previous.values()) row.remove();
+    const oldSections = [...current.children];
+    [...next.children].forEach((section, index) => {
+      if (section === nextList) return;
+      const old = oldSections[index];
+      const inputs = (node) => [...node.querySelectorAll('select, input, textarea')].map((input) => input.value).join('\u0000');
+      if (old && (!old.isEqualNode(section) || inputs(old) !== inputs(section))) old.replaceWith(section);
+    });
+    current.className = next.className;
+    return true;
   }
 
   function estimator(sync, view, handlers) {
@@ -616,5 +674,5 @@
     update();
     return page;
   }
-  Object.assign(app, { h, icon, button, gradeData, compact, dashboard, estimator });
+  Object.assign(app, { h, icon, button, gradeData, compact, dashboard, patchDashboard, estimator });
 })();

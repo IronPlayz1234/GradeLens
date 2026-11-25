@@ -1,10 +1,11 @@
 (() => {
   const app = globalThis.MBGC;
   const scheme = matchMedia('(prefers-color-scheme: dark)');
-  const color = (value) => {
+  const colors = new Map();
+  let colorContext;
+  const parseColor = (value) => {
     if (!value || !CSS.supports('color', value)) return null;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+    const ctx = colorContext ??= document.createElement('canvas').getContext('2d', { willReadFrequently: true });
     if (!ctx) return null;
     let result;
     for (const sentinel of ['#000001', '#ffffff']) {
@@ -13,9 +14,17 @@
       if (result && result !== ctx.fillStyle) return null;
       result = ctx.fillStyle;
     }
+    ctx.clearRect(0, 0, 1, 1);
     ctx.fillRect(0, 0, 1, 1);
     const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
     return a >= 240 ? [r, g, b] : null;
+  };
+  const color = (value) => {
+    if (!colors.has(value)) {
+      if (colors.size >= 64) colors.clear();
+      colors.set(value, parseColor(value));
+    }
+    return colors.get(value);
   };
   const luminance = (rgb) => rgb.reduce((sum, value, i) => {
     const unit = value / 255;

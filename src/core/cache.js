@@ -1,53 +1,75 @@
 (() => {
   const app = globalThis.MBGC;
   const settingsDefaults = { method: 'percentage', refreshMinutes: 5 };
-  const freshCache = () => ({ classes: {}, sources: [], sourceChecks: {}, lastSync: null, revision: 0 });
+  const freshCache = () => ({ classes: {}, sources: [], sourceChecks: {}, lastSync: null, revision: 0, clearedAt: 0 });
   const currentTerms = 'current';
+  const termKey = (id) => id ? 'term:' + id : 'unknown';
+  const hasGrades = (bucket) => Number.isInteger(bucket?.gradedCount) ? bucket.gradedCount > 0 :
+    Object.values(bucket?.records ?? {}).some((task) => app.validScore(task) && !task.excluded);
 
   function classTermKey(subject, nativeTerm = null) {
-    if (nativeTerm) return 'term:' + nativeTerm;
-    const preferred = subject?.selectedTerm ?? subject?.defaultTerm;
-    if (preferred) return 'term:' + preferred.id;
+    if (nativeTerm) return termKey(nativeTerm);
+    const pointers = [subject?.selectedTerm, subject?.defaultTerm].filter(Boolean);
+    for (const pointer of pointers) {
+      const bucket = subject.terms[termKey(pointer.id)];
+      if (bucket && (hasGrades(bucket) || (pointer === subject.selectedTerm && bucket.complete))) return termKey(pointer.id);
+    }
+    const usable = Object.entries(subject?.terms ?? {}).filter(([, bucket]) => bucket.termId && hasGrades(bucket));
+    if (usable.length === 1) return usable[0][0];
+    if (pointers.length) return termKey(pointers[0].id);
     const available = Object.entries(subject?.terms ?? {}).filter(([, bucket]) => bucket.termId && bucket.lastScan);
     return available.length === 1 ? available[0][0] : 'unknown';
   }
 
   function mergeScan(cache, snapshot) {
     const { records, classes, context, term, weights, scale, at, incremental } = snapshot;
-    const previousTerm = cache.classes[context.classId]?.terms[term.id ? 'term:' + term.id : 'unknown'];
-    const complete = snapshot.complete &&
-      (snapshot.visible || records.length > 0 || !Object.keys(previousTerm?.records ?? {}).length);
+    const classList = context.type === 'tasks';
+    const detail = context.type === 'task' && snapshot.completeRecord;
+    const rendered = snapshot.visible || snapshot.sourceKind === 'rendered';
+    const source = rendered ? 'rendered' : 'background';
+    const previousTerm = cache.classes[context.classId]?.terms[termKey(term.id)];
+    const authoritative = Boolean(classList && term.id && snapshot.complete && !incremental &&
+      (snapshot.visible || records.length || !Object.keys(previousTerm?.records ?? {}).length) &&
+      records.every((task) => task.classId === context.classId && task.termId === term.id));
+    const verifiedEdit = Boolean(incremental && snapshot.visible && snapshot.complete);
     if (snapshot.sources.length) cache.sources = [...new Set([...cache.sources, ...snapshot.sources])].slice(-300);
     const ensureClass = (classId) => cache.classes[classId] ??= { name: '', terms: {} };
     for (const [classId, name] of Object.entries(classes)) {
       const subject = ensureClass(classId);
       if (name) subject.name = name;
     }
-    const terms = new Map();
-    const incompleteScores = new Set();
     const ensureTerm = (classId, termId, label) => {
       const subject = ensureClass(classId);
-      const bucket = subject.terms[termId ? 'term:' + termId : 'unknown'] ??= {
+      const bucket = subject.terms[termKey(termId)] ??= {
         label, termId, records: {}, weights: {}, scale: null, lastScan: null, complete: false, weightScan: 0
       };
       if (label && (!bucket.label || bucket.label.startsWith('Term ') || bucket.label === 'Selected academic term')) bucket.label = label;
       return bucket;
     };
-    const classList = context.type === 'tasks';
+    const visited = new Map();
+    const touch = (bucket) => {
+      if (!visited.has(bucket)) visited.set(bucket, { ids: new Set(), preserved: false, read: false });
+      return visited.get(bucket);
+    };
     if (context.classId && !incremental) {
       const bucket = ensureTerm(context.classId, term.id, term.label);
-      if (classList) {
-        const hasList = complete || records.some((task) => task.termId === term.id);
-        if (hasList) terms.set(bucket, new Set());
+      if (classList && term.id) {
         const subject = ensureClass(context.classId);
-        const field = snapshot.visible ? 'selectedTerm' :
-          snapshot.defaultTerm && (hasList || classTermKey(subject) === 'unknown') ? 'defaultTerm' : null;
-        if (field && term.id && (subject[field]?.id !== term.id || !subject[field]) &&
-          at >= (subject[field]?.at ?? 0)) subject[field] = { id: term.id, at };
-        if (Object.keys(weights).length && at >= bucket.weightScan &&
-          (at - bucket.weightScan >= 30000 || Object.entries(weights).some(([key, value]) => bucket.weights[key] !== value))) {
-          bucket.weights = { ...bucket.weights, ...weights };
-          bucket.weightScan = at;
+        if (authoritative) touch(bucket).read = true;
+        const field = snapshot.visible ? 'selectedTerm' : snapshot.defaultTerm ? 'defaultTerm' : null;
+        const incoming = records.some((task) => task.classId === context.classId && task.termId === term.id && app.validScore(task));
+        const prior = subject.terms[classTermKey(subject)];
+        if (field && !snapshot.loading && at >= (subject[field]?.at ?? 0) &&
+          (incoming || (authoritative && snapshot.visible) || !hasGrades(prior))) {
+          subject[field] = { id: term.id, at };
+        }
+        if (!snapshot.loading && Object.keys(weights).length && at >= bucket.weightScan) {
+          const patch = Object.fromEntries(Object.entries(weights).filter(([name, value]) =>
+            authoritative || !Object.hasOwn(bucket.weights, name) || bucket.weights[name] === value));
+          if (Object.keys(patch).length) {
+            bucket.weights = { ...bucket.weights, ...patch };
+            bucket.weightScan = at;
+          }
         }
       }
       if (scale && at >= (bucket.scaleAt ?? 0)) {
@@ -56,52 +78,58 @@
       }
     }
     for (const task of records) {
+      if (classList && task.classId !== context.classId) continue;
       const bucket = ensureTerm(task.classId, task.termId, task.termId
         ? (task.termId === term.id ? term.label : `Term ${task.termId}`) : 'Unidentified term');
-      if (!terms.has(bucket)) terms.set(bucket, new Set());
-      terms.get(bucket).add(task.id);
+      const observed = touch(bucket);
+      observed.ids.add(task.id);
       const prior = bucket.records[task.id];
-      if (prior?.observedAt > at || (!prior && (bucket.lastComplete ?? 0) > at)) continue;
-      const graded = app.validScore(task);
-      const previouslyGraded = prior && app.validScore(prior);
-      const confirmedUngraded = classList && (snapshot.visible ? complete || task.explicitlyUngraded :
-        complete && task.explicitlyUngraded);
-      if (previouslyGraded && !graded && !confirmedUngraded) {
-        if (classList) {
-          bucket.records[task.id] = { ...prior, issue: task.issue || 'Latest scan did not expose this cached score' };
-          incompleteScores.add(bucket);
-        }
+      if (at < Math.max(prior?.observedAt ?? 0, bucket.lastComplete ?? 0)) continue;
+      const eligible = app.validScore(task);
+      const priorGrade = prior && app.validScore(prior);
+      if (!classList && !detail && prior?.classList && priorGrade) continue;
+      const gradeChanged = priorGrade && (!eligible || task.earnedPoints !== prior.earnedPoints ||
+        task.maxPoints !== prior.maxPoints || (task.category && prior.category && app.key(task.category) !== app.key(prior.category)) ||
+        Boolean(task.excluded) !== Boolean(prior.excluded));
+      const confirmedPoints = classList && rendered && eligible && !task.issue && !snapshot.loading;
+      const trusted = task.termId === term.id && (confirmedPoints || authoritative || verifiedEdit ||
+        (detail && task.classId === context.classId && task.id === context.taskId));
+      if (gradeChanged && (!trusted || (!eligible && !task.explicitlyUngraded))) {
+        observed.preserved = true;
         continue;
       }
-      if (!classList && prior?.classList && previouslyGraded) continue;
       if (!classList && !prior && bucket.complete) bucket.complete = false;
-      const normalized = { ...task, category: task.category || prior?.category || '', classList };
-      const changed = !prior || Object.keys(normalized).some((key) => normalized[key] !== prior[key]);
-      if (changed || at - prior.observedAt >= 30000) bucket.records[task.id] = { ...normalized, observedAt: at };
+      if (classList || detail || !bucket.lastScan) observed.read = true;
+      bucket.records[task.id] = { ...task, category: task.category || prior?.category || '',
+        observedAt: at, classList: classList || detail, fromDetail: Boolean(detail), source };
     }
-    for (const [bucket, seen] of terms) {
+    for (const [bucket, observed] of visited) {
       if (at < (bucket.lastScan ?? 0)) continue;
-      const authoritative = complete && bucket.termId === term.id && classList && !incremental;
-      let removed = false;
-      if (authoritative) {
-        if (!bucket.lastComplete || at - bucket.lastComplete >= 30000) bucket.lastComplete = at;
+      const complete = authoritative && bucket.termId === term.id;
+      if (complete) {
+        bucket.lastComplete = at;
         for (const [id, task] of Object.entries(bucket.records)) {
-          if (!seen.has(id) && task.observedAt <= at) {
-            delete bucket.records[id];
-            removed = true;
-          }
+          if (!observed.ids.has(id) && task.observedAt <= at) delete bucket.records[id];
         }
       }
-      if (removed) bucket.lastComplete = at;
-      if (classList) {
-        if (incompleteScores.has(bucket)) bucket.complete = false;
-        else if (!incremental) bucket.complete = authoritative;
-        if (at >= (bucket.lastErrorAt ?? 0)) bucket.lastError = null;
+      if (observed.preserved) {
+        bucket.complete = false;
+        bucket.lastError = 'The latest read did not verify a changed score. Previously verified points were kept.';
+        bucket.lastErrorAt = at;
+      } else if (classList) {
+        if (!incremental) bucket.complete = complete;
+        if (at >= (bucket.lastErrorAt ?? 0)) {
+          bucket.lastError = null;
+          bucket.lastErrorAt = at;
+        }
       }
-      // A cross-class overview can supply grades before any class scan, but cannot renew an older class list.
-      if (!bucket.lastScan || (classList && (incremental || removed || at - bucket.lastScan >= 30000 ||
-        [...seen].some((id) => bucket.records[id]?.observedAt === at)))) bucket.lastScan = at;
-      if (bucket.termId) cache.lastSync = Math.max(cache.lastSync ?? 0, bucket.lastScan);
+      bucket.dataRevision = (bucket.dataRevision ?? 0) + 1;
+      bucket.gradedCount = Object.values(bucket.records).filter((task) => app.validScore(task) && !task.excluded).length;
+      if (observed.read && !observed.preserved) {
+        bucket.lastScan = at;
+        bucket.lastSource = source;
+        if (bucket.termId) cache.lastSync = Math.max(cache.lastSync ?? 0, at);
+      }
     }
     return cache;
   }
@@ -110,16 +138,20 @@
     const checks = cache.sourceChecks ??= {};
     const previous = checks[check.source];
     if ((previous?.at ?? 0) > check.at) return;
-    checks[check.source] = check;
+    checks[check.source] = { ...check, renderedAt: check.renderedAt ?? previous?.renderedAt };
+    if (check.detail && !check.error) return;
     const subject = cache.classes[check.classId];
     if (!subject) return;
-    const key = check.termId ? 'term:' + check.termId : classTermKey(subject);
+    const key = check.termId ? termKey(check.termId) : classTermKey(subject);
     const target = subject.terms[key] ?? subject;
     if (check.at < Math.max(target.lastErrorAt ?? 0, target.lastScan ?? 0)) return;
-    target.lastError = check.error ?? null;
-    target.lastErrorAt = check.at;
-    if (check.unchanged && target !== subject && target.lastScan && check.termId) {
+    if (check.error || (target.lastErrorAt ?? 0) < check.at) {
+      target.lastError = check.error ?? null;
+      target.lastErrorAt = check.at;
+    }
+    if (check.unchanged && target !== subject && target.lastScan && check.termId && !target.lastError) {
       target.lastScan = check.at;
+      if (check.complete && target.complete) target.lastComplete = check.at;
       cache.lastSync = Math.max(cache.lastSync ?? 0, check.at);
     }
   }

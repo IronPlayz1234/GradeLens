@@ -1,8 +1,32 @@
-importScripts('core/grades.js', 'core/cache.js');
+importScripts('core/grades.js', 'core/cache.js', 'repository.js');
 
 const app = globalThis.MBGC;
 const origin = 'https://uia.managebac.com';
 let pending = Promise.resolve();
+const tabLeases = new Map();
+
+function enqueue(operation) {
+  const work = pending.then(operation);
+  pending = work.catch(() => {});
+  return work;
+}
+
+function cancelTabLease(tabId) {
+  const active = tabLeases.get(tabId);
+  if (!active) return;
+  tabLeases.delete(tabId);
+  void enqueue(async () => {
+    const stored = (await chrome.storage.session.get(active.leaseKey))[active.leaseKey];
+    if (stored?.token === active.token) {
+      await chrome.storage.session.remove([active.leaseKey, active.refreshKey]);
+    }
+  }).catch(() => {});
+}
+
+chrome.tabs.onRemoved.addListener(cancelTabLease);
+chrome.tabs.onUpdated.addListener((id, change) => {
+  if (change.status === 'loading') cancelTabLease(id);
+});
 
 async function notify(account, originTab) {
   const tabs = await chrome.tabs.query({ url: [origin + '/student', origin + '/student/*'] });
@@ -13,34 +37,27 @@ async function notify(account, originTab) {
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || (sender.origin != null && sender.origin !== origin) || sender.frameId !== 0 || !/^https:\/\/uia\.managebac\.com\/student(?:[/?#]|$)/.test(sender.url ?? '') ||
     typeof message !== 'object' || !message?.type?.startsWith('mbgc:')) return;
-  const work = pending.then(async () => {
+  const work = enqueue(async () => {
     const account = /^\d+$/.test(message.account ?? '') ? message.account : null;
     if (!account) throw new Error('A student account was not identified.');
     const key = `mbgc:cache:${new URL(origin).host}:${account}`;
     const overrideKey = `mbgc:overrides:${new URL(origin).host}:${account}`;
-    if (message.type === 'mbgc:get') return (await chrome.storage.session.get(key))[key] ?? app.freshCache();
-    if (message.type === 'mbgc:clear') {
-      const cleared = { ...app.freshCache(), clearedAt: Date.now() };
-      await chrome.storage.session.set({ [key]: cleared });
-      await chrome.storage.local.remove(overrideKey);
-      void notify(account, sender.tab?.id).catch(() => {});
-      return cleared;
-    }
-    if (message.type === 'mbgc:scan') {
-      const stored = (await chrome.storage.session.get(key))[key] ?? app.freshCache();
-      const before = JSON.stringify(stored);
-      for (const snapshot of message.snapshots) {
-        if (!stored.clearedAt || snapshot.at > stored.clearedAt) app.mergeScan(stored, snapshot);
+    if (['mbgc:get', 'mbgc:clear', 'mbgc:scan'].includes(message.type)) {
+      const state = await loadAccount(account);
+      if (message.type === 'mbgc:clear') {
+        const cleared = { ...app.freshCache(), clearedAt: Date.now() };
+        await saveAccount(account, cleared, [], true);
+        state.cache = cleared;
+        state.journal = [];
+        await chrome.storage.local.remove(overrideKey);
+        void notify(account, sender.tab?.id).catch(() => {});
+        return cleared;
       }
-      for (const check of message.checks ?? []) {
-        if (!stored.clearedAt || check.at > stored.clearedAt) app.mergeCheck(stored, check);
-      }
-      if (before !== JSON.stringify(stored)) {
-        stored.revision = (stored.revision ?? 0) + 1;
-        await chrome.storage.session.set({ [key]: stored });
+      if (message.type === 'mbgc:scan' &&
+        await commitScans(account, state, message.snapshots, message.checks ?? [])) {
         void notify(account, sender.tab?.id).catch(() => {});
       }
-      return stored;
+      return replyFor(state, message.since, message.epoch);
     }
     if (message.type === 'mbgc:lease' || message.type === 'mbgc:release') {
       const leaseKey = key + ':lease';
@@ -48,18 +65,26 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       const stored = await chrome.storage.session.get([leaseKey, refreshKey]);
       const lease = stored[leaseKey];
       if (message.type === 'mbgc:release') {
-        if (lease?.token === message.token && lease.owner === sender.tab?.id) await chrome.storage.session.remove(leaseKey);
+        if (lease?.token === message.token && lease.owner === sender.tab?.id) {
+          if (tabLeases.get(lease.owner)?.token === lease.token) tabLeases.delete(lease.owner);
+          await chrome.storage.session.remove(message.aborted ? [leaseKey, refreshKey] : leaseKey);
+        }
         return null;
       }
       const now = Date.now();
-      if (lease?.until > now || now - (stored[refreshKey] ?? 0) < (message.manual || message.hasNewSources ? 3000 : message.interval)) return null;
+      const replacedDocument = lease?.owner === sender.tab?.id && lease?.documentId && sender.documentId &&
+        lease.documentId !== sender.documentId;
+      if (!replacedDocument && lease?.until > now) return null;
+      if (!replacedDocument && now - (stored[refreshKey] ?? 0) < (message.manual || message.hasNewSources ? 3000 : message.interval)) return null;
       const token = crypto.randomUUID();
-      await chrome.storage.session.set({ [refreshKey]: now, [leaseKey]: { token, owner: sender.tab?.id, until: now + 95000 } });
+      const owner = sender.tab?.id;
+      await chrome.storage.session.set({ [refreshKey]: now,
+        [leaseKey]: { token, owner, documentId: sender.documentId, until: now + 95000 } });
+      tabLeases.set(owner, { token, leaseKey, refreshKey });
       return token;
     }
     throw new Error('Unrecognized storage operation.');
   });
-  pending = work.catch(() => {});
   work.then((value) => respond({ value }), (error) => respond({ error: error.message }));
   return true;
 });

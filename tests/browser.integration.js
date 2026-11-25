@@ -19,7 +19,7 @@ async function extensionWorld(context, page) {
   await protocol.send('Runtime.enable');
   const isolated = worlds.find((world) => world.name === 'ManageBac Grade Calculator');
   assert.ok(isolated, JSON.stringify(worlds));
-  return (expression) => protocol.send('Runtime.evaluate', { contextId: isolated.id, expression });
+  return (expression, options = {}) => protocol.send('Runtime.evaluate', { contextId: isolated.id, expression, ...options });
 }
 
 
@@ -138,12 +138,13 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     await waitText('.mbgc-compact .mbgc-numeral', '53.85%');
     assert.equal(await page.locator('.mbgc-card-host').count(), 1);
 
-    // Bypass the network cooldown in the fixture, then verify a manual refresh reads the second class.
+    // Let any dashboard-triggered refresh finish, then test an explicit manual refresh.
+    await page.getByRole('link', { name: 'Overall Grades' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).waitFor();
     physics = physics.replace('9 / 10 pts', '10 / 10 pts');
     await worker.evaluate(async () => {
       await chrome.storage.session.remove('mbgc:cache:uia.managebac.com:9:refresh');
     });
-    await page.getByRole('link', { name: 'Overall Grades' }).click();
     await page.getByLabel('Academic term').selectOption('term:71');
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await waitText('.mbgc-feedback', 'Checked');
@@ -165,8 +166,8 @@ test('unpacked extension synchronizes student routes, handles term and chart cha
     account = '19';
     await second.reload();
     await second.waitForFunction(() => document.querySelector('.mbgc-compact .mbgc-numeral')?.textContent === 'No grade available');
-    const stored = await worker.evaluate(() => chrome.storage.session.get('mbgc:cache:uia.managebac.com:9'));
-    assert.ok(stored['mbgc:cache:uia.managebac.com:9']);
+    const stored = await worker.evaluate(async () => (await loadAccount('9')).cache);
+    assert.ok(stored.classes['123']);
     assert.deepEqual(pageErrors, []);
   } finally {
     await context.close();
@@ -279,14 +280,17 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     await evaluateExtension(`globalThis.originalSend = chrome.runtime.sendMessage;
       chrome.runtime.sendMessage = (message) => message.type === 'mbgc:scan'
         ? Promise.reject(new Error('simulated cache write failure')) : globalThis.originalSend(message)`);
-    await page.evaluate(() => { document.querySelector('.score-points').textContent = '19 / 20'; });
+    await page.evaluate(() => {
+      document.querySelector('#term-results').setAttribute('data-total-count', '3');
+      document.querySelector('.score-points').textContent = '19 / 20';
+    });
     await page.locator('.mbgc-compact .mbgc-numeral', { hasText: '57.00%' }).waitFor();
-    await page.locator('.mbgc-compact').getByText(/Session cache unavailable/).waitFor();
+    await page.locator('.mbgc-compact').getByText(/Grade cache unavailable/).waitFor();
     await evaluateExtension('chrome.runtime.sendMessage = globalThis.originalSend');
     await page.getByRole('link', { name: 'Overall Grades' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await page.getByText('Sync diagnostics', { exact: true }).click();
-    await page.getByText('Verified student session cache', { exact: true }).waitFor();
+    await page.getByText('Verified student grade cache', { exact: true }).waitFor();
 
     useLettersOnly = true;
     await page.goto(host + tasksPath);
@@ -382,7 +386,7 @@ test('automatically discovers enrolled classes, keeps PE consistent, and coalesc
     await grade('Mathematics', '67.50%');
     await row('Mathematics').getByText(/4 graded assessments/).waitFor();
     await row('Visual Arts').locator('summary').click();
-    await row('Visual Arts').getByText(/No task rows in the returned page/).waitFor();
+    await row('Visual Arts').getByText(/No verifiable task scores in the returned HTML/).waitFor();
     await dashboard.getByLabel('Academic term').locator('option[value="term:812"]').waitFor({ state: 'attached' });
     assert.ok(requests.has('/student/classes?page=2'));
     assert.ok(requests.has(oldPE));
@@ -430,11 +434,11 @@ test('automatically discovers enrolled classes, keeps PE consistent, and coalesc
     const worker = context.serviceWorkers()[0];
     await worker.evaluate(() => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:28:refresh'));
     await dashboard.getByRole('button', { name: 'Refresh now' }).click();
-    await dashboard.getByText(/1 unchanged/).waitFor();
+    await dashboard.getByText(/\d+ unchanged/).waitFor();
     await grade('Physical Education AS', '95.00%');
     await peRow.getByText(/2 graded assessments/).waitFor();
     await peRow.locator('summary').click();
-    await peRow.getByText(/No task rows in the returned page/).waitFor();
+    await peRow.getByText(/No verifiable task scores in the returned HTML/).waitFor();
     await peRow.getByText(/Last successful sync/).waitFor();
     assert.deepEqual(requests.get(mathPath), [undefined, '"math-v1"']);
   } finally {
@@ -481,6 +485,124 @@ test('mixed subjects sync from the roster and distinguish no grade from a genuin
     await tab.getByRole('link', { name: 'Grade Estimator' }).click();
     await tab.getByLabel('Subject').selectOption(art.id);
     await tab.locator('.mbgc-actual').getByText('No grade available', { exact: true }).waitFor();
+  } finally {
+    await context.close();
+    await fs.rm(userData, { recursive: true, force: true });
+  }
+});
+
+test('render-only and linked results sync automatically and verified grades survive a cold cache read', { timeout: 40000 }, async () => {
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'mbgc-rendered-results-'));
+  const context = await chromium.launchPersistentContext(userData, {
+    ...(browserPath ? { executablePath: browserPath } : { channel: 'chromium' }), headless: true,
+    args: ['--disable-extensions-except=' + root, '--load-extension=' + root],
+    viewport: { width: 1200, height: 860 }
+  });
+  try {
+    const { page: html, tasksPath, tasksPage } = require('./fixtures/subjects');
+    const rendered = { id: '512', name: 'Mathematics', categories: [['Exercises', 100]],
+      tasks: [['Exercises', '<div class="task-score"><span class="points">42 / 50</span></div>']] };
+    const linked = { id: '513', name: 'Physics', categories: [['Practical', 100]],
+      tasks: [['Practical', '<span class="letter-grade">B</span>']] };
+    const renderedPath = tasksPath(rendered);
+    const linkedPath = tasksPath(linked);
+    const published = tasksPage(rendered);
+    const scripts = published.slice(published.indexOf('<section'), published.indexOf('</main>'))
+      .replace(/<select[\s\S]*?<\/select>/, '<button type="button" role="combobox" aria-controls="terms-list">Semester 1 (current)</button>');
+    const placeholder = scripts.replace('<span class="points">42 / 50</span>', '<span>Pending</span>');
+    const shell = html(`<h1 class="class-title">Mathematics</h1>${placeholder}
+      <script>
+      document.addEventListener('click', (event) => {
+        if (!event.target.matches('[role="combobox"]')) return;
+        document.body.insertAdjacentHTML('beforeend', '<div id="terms-list" role="listbox"><span role="option" data-term-id="term-512" aria-selected="true">Semester 1 (current)</span></div>');
+      });
+      setTimeout(() => { document.querySelector('main').innerHTML = ${JSON.stringify(scripts)}; }, 1250);
+      </script>`);
+    const linkedMarkup = tasksPage(linked).replace('>Assessment 1</a>', ' data-assessment-result-link>Assessment 1</a>');
+    let fail = false;
+    let frameReads = 0;
+    let detailReads = 0;
+    let detailPoints = 31;
+    let rosterReads = 0;
+    await context.route(host + '/**', (intercepted) => {
+      const request = intercepted.request();
+      const path = new URL(request.url()).pathname;
+      if (path === renderedPath && request.isNavigationRequest() && request.frame().parentFrame()) frameReads++;
+      if (path === linkedPath + '/1') detailReads++;
+      if (path === '/student/classes') rosterReads++;
+      if (fail && [renderedPath, linkedPath, linkedPath + '/1'].includes(path) && !request.isNavigationRequest()) {
+        return intercepted.fulfill({ status: 503, body: 'Unavailable' });
+      }
+      const body = path === '/student/classes' ? html(
+        '<a href="/student/classes/512">Mathematics</a><a href="/student/classes/513">Physics</a>') :
+        path === renderedPath ? shell :
+        path === linkedPath ? linkedMarkup :
+        path === linkedPath + '/1' ? html(`<div data-assessment-result><span class="points">${detailPoints} / 40</span></div>`) :
+        html('<h1>Workspace</h1>');
+      return intercepted.fulfill({ contentType: 'text/html', body });
+    });
+    context.setDefaultTimeout(9000);
+    const tab = await context.newPage();
+    const second = await context.newPage();
+    await tab.goto(host + '/student/dashboard');
+    await second.goto(host + '/student/dashboard');
+    await tab.bringToFront();
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker');
+    const otherWorld = await extensionWorld(context, second);
+    const otherLease = await otherWorld(`chrome.runtime.sendMessage({ type: 'mbgc:lease', account: '81', manual: true })`,
+      { awaitPromise: true, returnByValue: true });
+    assert.equal(otherLease.exceptionDetails, undefined);
+    assert.equal(otherLease.result.value.value, null);
+    const row = (name) => tab.locator('.mbgc-subject', { hasText: name });
+    await row('Mathematics').locator('.mbgc-numeral', { hasText: '84.00%' }).waitFor();
+    await row('Physics').locator('.mbgc-numeral', { hasText: '77.50%' }).waitFor();
+    assert.equal(await row('Mathematics').locator('.mbgc-categories').count(), 0);
+    await row('Mathematics').locator('summary').click();
+    await row('Mathematics').getByText(/Source: rendered student page/).waitFor();
+    assert.equal(frameReads, 1);
+    assert.equal(detailReads, 1);
+    assert.equal(rosterReads, 1);
+    await tab.getByRole('button', { name: 'Refresh now' }).waitFor();
+    const idle = await tab.evaluate(async () => {
+      let writes = 0;
+      const observer = new MutationObserver((records) => { writes += records.length; });
+      observer.observe(document.querySelector('main'), { attributes: true, attributeFilter: ['class'] });
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      observer.disconnect();
+      return writes;
+    });
+    assert.equal(idle, 0, 'an idle dashboard must not repeatedly mutate the native container');
+    await tab.getByRole('link', { name: 'Grade Estimator' }).click();
+    await tab.getByLabel('Subject').selectOption('512');
+    await tab.locator('.mbgc-actual .mbgc-numeral', { hasText: '84.00%' }).waitFor();
+    await tab.goto(host + '/student/classes/512');
+    await tab.locator('.mbgc-compact .mbgc-numeral', { hasText: '84.00%' }).waitFor();
+    await tab.goto(host + renderedPath);
+    await tab.getByRole('combobox').click();
+    await tab.locator('.mbgc-compact .mbgc-numeral', { hasText: '84.00%' }).waitFor();
+    await tab.getByRole('link', { name: 'Overall Grades' }).click();
+    await row('Mathematics').locator('.mbgc-numeral', { hasText: '84.00%' }).waitFor();
+
+    detailPoints = 32;
+    await worker.evaluate(() => chrome.storage.session.remove('mbgc:cache:uia.managebac.com:81:refresh'));
+    await tab.getByRole('button', { name: 'Refresh now' }).click();
+    await row('Physics').locator('.mbgc-numeral', { hasText: '80.00%' }).waitFor();
+    await tab.getByRole('button', { name: 'Refresh now' }).waitFor();
+    fail = true;
+    await worker.evaluate(async () => {
+      accountStates.delete('81');
+      await chrome.storage.session.remove('mbgc:cache:uia.managebac.com:81:refresh');
+    });
+    await tab.goto(host + '/student/dashboard#mbgc-overall-grades');
+    await row('Mathematics').locator('.mbgc-numeral', { hasText: '84.00%' }).waitFor();
+    await row('Physics').locator('.mbgc-numeral', { hasText: '80.00%' }).waitFor();
+    // Recent sources are reused automatically. Force a recheck to exercise a failed refresh.
+    await tab.getByRole('button', { name: 'Refresh now' }).click();
+    await tab.getByText(/pages could not be verified/i).waitFor();
+    await row('Mathematics').locator('summary').click();
+    await row('Mathematics').getByText(/Cache · last read from rendered student page/).waitFor();
+    await row('Mathematics').getByText(/Last successful sync/).waitFor();
   } finally {
     await context.close();
     await fs.rm(userData, { recursive: true, force: true });

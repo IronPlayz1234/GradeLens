@@ -67,7 +67,7 @@ test('upserts changes, accepts new grades, preserves partial omissions, then rem
   clone.querySelector('a').setAttribute('href', '/student/classes/123/core_tasks/5');
   doc.querySelector('[data-task-list]').append(clone);
   apply(2);
-  assert.equal(term.records['1'].earnedPoints, 10);
+  assert.equal(term.records['1'].earnedPoints, 8);
   assert.equal(term.records['5'].earnedPoints, 10);
   doc.querySelector('#task-one').remove();
   doc.querySelector('[data-task-list]').setAttribute('data-total-count', '5');
@@ -229,4 +229,135 @@ test('discovers and calculates a mixed roster from class-specific point evidence
       else assert.ok(Math.abs(percentage - expected) < 1e-9, subject.name + ' ' + method + ': ' + percentage);
     }
   }
+});
+
+test('five class caches survive incomplete alternate terms and failures; only a confirmed change replaces points', () => {
+  const cache = app.freshCache();
+  const names = ['Chemistry', 'Physical Education AS', 'Mathematics', 'Physics', 'Computer Science'];
+  const scores = [33.05, 100, 92, 86, 89];
+  const snapshot = (index, at, points = scores[index], options = {}) => {
+    const classId = String(660 + index);
+    const termId = options.termId ?? 'school-' + index;
+    return { classes: { [classId]: names[index] }, context: { classId, type: 'tasks' },
+      term: { id: termId, label: options.label ?? 'Semester 1' },
+      records: [{ id: '1', classId, termId, category: 'Coursework', earnedPoints: points, maxPoints: 100 }],
+      weights: { Coursework: 100 }, sources: [], at, complete: true, defaultTerm: true, ...options };
+  };
+  const percentages = () => names.map((_, index) => {
+    const subject = cache.classes[String(660 + index)];
+    const bucket = subject.terms[app.classTermKey(subject)];
+    return app.calculate(Object.values(bucket.records), bucket.weights).percentage;
+  });
+  names.forEach((_, index) => app.mergeScan(cache, snapshot(index, 10)));
+  app.mergeScan(cache, snapshot(2, 21, null, { termId: 'shell-999', complete: false, weights: {} }));
+  app.mergeScan(cache, snapshot(2, 22, 25, { complete: false, weights: { Coursework: 15 } }));
+  app.mergeCheck(cache, { source: '/student/classes/662/core_tasks', classId: '662', at: 25, error: 'HTML did not expose grades.' });
+  assert.deepEqual(percentages(), scores);
+  assert.equal(cache.classes['662'].terms['term:school-2'].lastScan, 10);
+  assert.equal(cache.classes['662'].terms['term:school-2'].weights.Coursework, 100);
+  app.mergeScan(cache, snapshot(2, 35, 94));
+  app.mergeScan(cache, snapshot(2, 32, 40));
+  assert.deepEqual(percentages(), [33.05, 100, 94, 86, 89]);
+});
+
+test('task detail extracts an explicit result for the linked class, term and assessment only', () => {
+  const known = {
+    id: '48', classId: '123', termId: '71', category: 'Projects', title: 'Coursework',
+    earnedPoints: null, maxPoints: null, gradeKind: 'letter',
+    taskUrl: tasksURL.pathname + '/48'
+  };
+  const detailUrl = new URL(tasksURL + '/48');
+  const doc = parseHTML('<html><body><main><div data-assessment-result><span class="points">17 / 25</span></div></main></body></html>').document;
+  const snapshot = app.scanTaskDetail(doc, detailUrl, known);
+  assert.equal(snapshot.records[0].earnedPoints, 17);
+  assert.equal(snapshot.records[0].maxPoints, 25);
+  assert.equal(snapshot.records[0].category, 'Projects');
+  assert.equal(app.scanTaskDetail(doc, new URL(tasksURL + '/49'), known), null);
+  doc.querySelector('[data-assessment-result]').setAttribute('data-term-id', '72');
+  assert.equal(app.scanTaskDetail(doc, detailUrl, known), null);
+});
+
+test('restores the term on an asynchronously populated select and an identified term trigger', () => {
+  const doc = fixture('desktop-integration');
+  const header = doc.querySelector('.titlebar');
+  header.innerHTML = '<div class="title">All Tasks</div><select data-selected-term-id="671"></select>';
+  assert.equal(app.scan(doc, tasksURL).term.id, '671');
+  header.innerHTML = '<div class="title">All Tasks</div><button role="combobox" data-semester-id="671">Semester 1 (current)</button>';
+  assert.deepEqual(app.scan(doc, tasksURL).term, { id: '671', label: 'Semester 1 (current)' });
+});
+
+test('a missing task identifier cannot confirm removal and a rendered correction can update its own row', () => {
+  const doc = fixture('class-tasks');
+  const cache = app.freshCache();
+  const apply = (at) => app.mergeScan(cache, { ...app.scan(doc, tasksURL), visible: true, at });
+  apply(10);
+  doc.querySelector('#task-one .points').textContent = '9 / 10';
+  doc.querySelectorAll('.short-assignment')[1].querySelector('a').removeAttribute('href');
+  apply(12);
+  const bucket = cache.classes['123'].terms['term:71'];
+  assert.equal(bucket.complete, false);
+  assert.equal(bucket.records['1'].earnedPoints, 9);
+  assert.equal(bucket.records['2'].earnedPoints, 15);
+  assert.equal(bucket.gradedCount, 4);
+});
+
+test('an empty unattended rendered list cannot delete saved grades', () => {
+  const doc = fixture('class-tasks');
+  const cache = app.freshCache();
+  app.mergeScan(cache, { ...app.scan(doc, tasksURL), visible: true, at: 1 });
+  const list = doc.querySelector('[data-task-list]');
+  list.replaceChildren();
+  list.setAttribute('data-total-count', '0');
+  app.mergeScan(cache, { ...app.scan(doc, tasksURL), sourceKind: 'rendered', at: 2 });
+  assert.equal(cache.classes['123'].terms['term:71'].gradedCount, 4);
+});
+
+test('uses explicit class-scoped assessment IDs when a row has no task link', () => {
+  const doc = fixture('class-tasks');
+  const row = doc.querySelector('#task-one');
+  row.setAttribute('data-assessment-id', '551');
+  assert.equal(app.scan(doc, tasksURL).records.length, 3);
+  row.querySelector('a').remove();
+  const task = app.scan(doc, tasksURL).records.find((item) => item.id === '551');
+  assert.equal(task.earnedPoints, 8);
+  assert.equal(task.taskUrl, null);
+  row.setAttribute('data-class-id', '999');
+  assert.equal(app.scan(doc, tasksURL).records.length, 3);
+});
+
+test('document-only grade views recalculate after an in-place cache update', () => {
+  require('../src/ui/views.js');
+  const doc = fixture('class-tasks');
+  const sync = { cache: app.freshCache(), settings: app.settingsDefaults, overrides: { weights: {} } };
+  const apply = (at) => app.mergeScan(sync.cache, { ...app.scan(doc, tasksURL), visible: true, at });
+  apply(1);
+  const first = app.gradeData(sync, '123', 'term:71');
+  doc.querySelector('#task-one .points').textContent = '9 / 10';
+  const updated = app.scan(doc, tasksURL);
+  app.mergeScan(sync.cache, { ...updated, records: [updated.records[0]], incremental: true, visible: true, at: 2 });
+  assert.equal(first.result.percentage, 74.5);
+  assert.equal(app.gradeData(sync, '123', 'term:71').result.percentage, 76);
+});
+
+test('uses self-profile links in account menus and requires unambiguous identity', () => {
+  const doc = fixture('class-tasks');
+  const link = doc.querySelector('header a');
+  doc.querySelector('main').append(link);
+  assert.equal(app.account(doc, tasksURL), null);
+  const menu = doc.createElement('div');
+  menu.setAttribute('role', 'menu');
+  menu.append(link);
+  doc.body.append(menu);
+  assert.equal(app.account(doc, tasksURL), '9');
+  doc.body.setAttribute('data-current-student-id', '11');
+  assert.equal(app.account(doc, tasksURL), null);
+});
+
+test('background parser identifies a still-rendered previous term under the new selector', () => {
+  const doc = fixture('class-tasks');
+  doc.querySelector('option[selected]').setAttribute('value', '72');
+  const snapshot = app.scan(doc, tasksURL);
+  assert.equal(snapshot.term.id, '72');
+  assert.equal(snapshot.diagnostic.loading, true);
+  assert.equal(snapshot.complete, false);
 });
