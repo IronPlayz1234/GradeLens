@@ -218,6 +218,10 @@ test('desktop integration regression with a narrow native wrapper and asynchrono
     assert.equal(widths.isolated, true);
     assert.equal(widths.headerMax, 'none');
     await page.getByText('54.00%', { exact: true }).waitFor();
+    const subject = page.locator('.mbgc-subject').filter({ hasText: '54.00%' });
+    await subject.getByText('Task list unverified', { exact: true }).waitFor();
+    await subject.locator('summary').click();
+    await subject.getByText(/could not confirm that the task list includes every assessment/).waitFor();
     await page.getByText('Sync diagnostics', { exact: true }).click();
     const { version } = JSON.parse(await fs.readFile(path.join(root, 'manifest.json'), 'utf8'));
     await page.getByText('Extension version ' + version, { exact: true }).waitFor();

@@ -113,7 +113,8 @@
     const bucket = entry?.terms[termKey];
     const cached = bucket && calculated.get(bucket);
     const verified = Boolean(bucket?.termId);
-    const weights = sync.overrides.weights[classId] ?? bucket?.weights ?? {};
+    const customWeights = sync.overrides.weights[classId];
+    const weights = customWeights ?? bucket?.weights ?? {};
     const error = bucket?.lastErrorAt ? bucket.lastError : entry?.lastError;
     const scale = sync.overrides.scale ?? bucket?.scale ?? app.defaultScale;
     const scaleLabel = sync.overrides.scale ? 'Custom letter scale' : bucket?.scale ? 'Displayed task letter scale' : 'Default task letter scale';
@@ -128,7 +129,6 @@
       : (bucket?.lastScan ? 'Source: cache' : 'Source unavailable');
     const staleAfter = Math.max(15, sync.settings.refreshMinutes * 2) * 60000;
     const stale = Boolean(bucket?.lastScan && Date.now() - bucket.lastScan > staleAfter);
-    const provisional = !bucket?.complete || Boolean(error) || result.flagged > 0 || stale || Boolean(sync.overrides.weights[classId]);
     const missing = !verified ? 'Term unavailable. Confirm the academic term in Class Tasks.' :
       result.missing.length ? `Weights needed for ${result.missing.join(', ')}.` :
         !result.count ? (result.flagged ? 'Assessment points are missing or invalid.' :
@@ -136,7 +136,7 @@
             'Could not verify graded assessments for this term.') :
           result.percentage === null ? 'No graded assessments have a positive category weight.' : '';
     return { classId, title: entry?.name || `Class ${classId}`, bucket, tasks, verified, weights, scale, scaleLabel,
-      result, stale, provisional, error, missing, provenance, termKey, label: bucket?.label || 'Unidentified term' };
+      result, stale, customWeights: Boolean(customWeights), error, missing, provenance, termKey, label: bucket?.label || 'Unidentified term' };
   }
 
   function score(value, scale, className = '') {
@@ -214,7 +214,14 @@
   }
 
   function labelStatus(data) {
-    return data.error ? "Couldn’t refresh" : data.stale ? 'Last sync out of date' : data.provisional ? 'Some grades unavailable' : data.result.count ? 'Up to date' : 'No graded assessments';
+    if (data.error) return 'Couldn’t refresh';
+    if (data.stale) return 'Last sync out of date';
+    if (!data.verified) return 'Term unavailable';
+    if (data.result.missing.length) return 'Category weights needed';
+    if (data.result.flagged) return 'Assessments need review';
+    if (!data.bucket.complete) return 'Task list unverified';
+    if (data.customWeights) return 'Custom weights';
+    return data.result.count ? 'Up to date' : 'No graded assessments';
   }
 
   function compact(sync, data, type, changed) {
@@ -274,12 +281,12 @@
         data.missing ? h('p', 'mbgc-notice', data.missing) : null,
         data.error ? h('p', 'mbgc-notice', data.error) :
           data.bucket?.lastScan && !data.bucket.complete ? h('p', 'mbgc-muted',
-            'The full task list could not be verified. Open Class Tasks if ManageBac loads additional assessments after rendering.') : null,
+            'The extension could not confirm that the task list includes every assessment for this term. Any estimate shown uses the scored assessments listed here.') : null,
         h('div', 'mbgc-detail-meta',
           h('p', 'mbgc-muted', app.methods[sync.settings.method].explanation, ' ',
             data.scaleLabel, '. ', data.provenance, '. ',
             data.bucket?.lastScan ? `Last successful sync ${time(data.bucket.lastScan)}.` : 'No successful sync for this term.',
-            data.result.ungraded ? ` ${data.result.ungraded} without usable scores.` : '',
+            data.result.ungraded ? ` ${data.result.ungraded} ungraded or without usable numerical scores.` : '',
             data.result.flagged ? ` ${data.result.flagged} flagged for review.` : '',
             data.result.excluded ? ` ${data.result.excluded} excluded by grading rules.` : ''),
           open)));
@@ -496,11 +503,13 @@
 
     const category = select(categories.map((name) => [name, name]), model.pick, (name) => {
       model.pick = name;
+      model.previewPaused = false;
       model.replaces = '';
       handlers.render();
     });
     const replacing = select(taskOptions(), model.replaces, (id) => {
       model.replaces = id;
+      model.previewPaused = false;
       const task = data.tasks.find((item) => item.id === id);
       if (task) {
         model.max = task.maxPoints;
@@ -547,7 +556,7 @@
       const input = draft();
       const entries = model.entries.filter((entry) => entry.id !== model.editing);
       const base = app.withHypotheticals(data.tasks, entries);
-      const simulated = app.withHypotheticals(base, usable ? [input] : []);
+      const simulated = app.withHypotheticals(base, usable && !model.previewPaused ? [input] : []);
       const result = app.calculate(simulated, data.weights, sync.settings.method, model.overrides);
       const target = model.targetMode === 'letter' ? data.scale.find(([, label]) => label === model.targetLetter)?.[0] : model.target;
       const required = app.targetScore({ tasks: base, weights: data.weights, method: sync.settings.method,
@@ -573,7 +582,7 @@
         title = 'Target out of reach';
         explanation = `Full marks on this assessment would predict ${percent(required.predicted)} overall.`;
       } else {
-        const minimum = Math.min(model.max, Math.ceil(required.required * 100) / 100);
+        const minimum = Math.min(model.max, Math.ceil((required.required - 1e-10) * 100) / 100);
         title = required.state === 'achieved' ? 'Already within reach at 0 points' : `${number(minimum, 6)} / ${number(model.max, 6)} points`;
         explanation = `${percent(100 * minimum / model.max)} on this assessment · ${percent(required.predicted)} predicted overall at the threshold.`;
       }
@@ -607,16 +616,9 @@
       model.entries = [...model.entries.filter((entry) => entry.id !== model.editing), task];
       delete model.editing;
       model.replaces = '';
+      model.previewPaused = true;
       handlers.render();
     }, 'plus', 'mbgc-primary');
-    // A saved draft stays in the prediction without also adding an unsaved duplicate.
-    const saveDraft = add.onclick;
-    add.addEventListener('click', () => {
-      if (app.validScore(draft()) && max.checkValidity()) {
-        model.previewPaused = true;
-        handlers.render();
-      }
-    });
     for (const input of [points, max, slider]) input.addEventListener('input', () => {
       if (model.previewPaused) {
         model.previewPaused = false;
